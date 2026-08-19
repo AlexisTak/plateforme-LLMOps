@@ -1,0 +1,12 @@
+{"query": "comment faire des pauses régulières en travaillant ?", "expected_doc": "methode_pomodoro"}
+{"query": "combien de temps dure un pomodoro ?", "expected_doc": "methode_pomodoro"}
+{"query": "comment sortir toutes mes tâches de ma tête pour arrêter d'y penser ?", "expected_doc": "methode_gtd"}
+{"query": "c'est quoi une next action en GTD ?", "expected_doc": "methode_gtd"}
+{"query": "comment écrire rapidement tout ce qui m'encombre l'esprit ?", "expected_doc": "decharge_mentale"}
+{"query": "qu'est-ce que le brain dump ?", "expected_doc": "decharge_mentale"}
+{"query": "comment réserver des créneaux dans mon agenda pour mes tâches ?", "expected_doc": "time_blocking"}
+{"query": "c'est quoi le time blocking ?", "expected_doc": "time_blocking"}
+{"query": "est-ce que Biscuits Focus pose un diagnostic de TDAH ?", "expected_doc": "biscuits_focus_produit"}
+{"query": "sur quel modèle de langage est basé Biscuits Focus ?", "expected_doc": "biscuits_focus_produit"}
+{"query": "comment prioriser entre ce qui est urgent et ce qui est important ?", "expected_doc": "loi_pareto_eisenhower"}
+{"query": "c'est quoi la règle des 80/20 ?", "expected_doc": "loi_pareto_eisenhower"}

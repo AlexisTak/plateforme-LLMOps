@@ -1,0 +1,26 @@
+.venv/
+.llama-cpp-tools/  # shallow clone, only used for convert_hf_to_gguf.py — not project code
+__pycache__/
+*.pyc
+
+# large / generated artifacts — regenerate via scripts, don't commit
+models/base/*
+!models/base/.gitkeep
+models/merged/*
+!models/merged/.gitkeep
+models/quantized/*
+!models/quantized/.gitkeep
+rag/embeddings/*
+!rag/embeddings/.gitkeep
+rag/index/*
+!rag/index/.gitkeep
+
+# adapters are small (few MB) — keep tracked, but ignore optimizer/checkpoint junk
+models/adapters/*/checkpoint-*/
+models/adapters/*/optimizer.pt
+
+experiments/*/logs/
+*.log
+
+.env
+*.local.md

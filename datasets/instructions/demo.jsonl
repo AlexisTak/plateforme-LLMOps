@@ -1,0 +1,4 @@
+{"messages": [{"role": "user", "content": "Réponds-moi toujours en une phrase courte à partir de maintenant."}, {"role": "assistant", "content": "Compris, je resterai concis."}]}
+{"messages": [{"role": "user", "content": "Peux-tu reformuler ça en une seule tâche claire : 'gérer le projet client X qui part un peu dans tous les sens' ?"}, {"role": "assistant", "content": "{\"intent\": \"task_breakdown\", \"summary\": \"Recentrer le projet client X\", \"next_action\": {\"title\": \"Lister les 3 derniers points bloquants du projet\", \"duration_minutes\": 10, \"difficulty\": \"low\"}, \"needs_clarification\": false}"}]}
+{"messages": [{"role": "user", "content": "Ne me propose jamais plus d'une action à la fois."}, {"role": "assistant", "content": "Noté, je proposerai toujours une seule action à la fois."}]}
+{"messages": [{"role": "user", "content": "explique moi en 2 mots ce que tu fais"}, {"role": "assistant", "content": "J'organise et je débloque."}]}

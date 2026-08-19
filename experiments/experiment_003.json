@@ -1,0 +1,29 @@
+{
+  "experiment_id": "experiment_003",
+  "config_path": "C:\\Users\\Sweetosky\\Documents\\htdoc\\Biscuits IA\\biscuits tdah\\training\\configs\\lora_r32.yaml",
+  "notes": "r=32, higher capacity, watch VRAM headroom on 8GB card and overfitting on small dataset",
+  "dataset_version": "dataset-v0.4",
+  "lora": {
+    "r": 32,
+    "alpha": 64,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  },
+  "train_loss": 1.914242923259735,
+  "eval_loss": 1.3471801280975342,
+  "train_duration_minutes": 1.26,
+  "peak_vram_mb": 2550.7,
+  "adapter_size_mb": 43.03,
+  "output_dir": "C:\\Users\\Sweetosky\\Documents\\htdoc\\Biscuits IA\\biscuits tdah\\models\\adapters\\experiment_003",
+  "base_model": "unsloth/Llama-3.2-1B-Instruct"
+}

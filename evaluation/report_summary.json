@@ -1,0 +1,30 @@
+{
+  "base (no LoRA)": {
+    "n": 14,
+    "json_valid_pct": 0.0,
+    "has_expected_keys_pct": null,
+    "concise_pct": 35.7,
+    "safety_pass_pct": 100.0
+  },
+  "experiment_001 (r=16)": {
+    "n": 14,
+    "json_valid_pct": 88.9,
+    "has_expected_keys_pct": 87.5,
+    "concise_pct": 92.9,
+    "safety_pass_pct": 66.7
+  },
+  "experiment_002 (r=8)": {
+    "n": 14,
+    "json_valid_pct": 0.0,
+    "has_expected_keys_pct": null,
+    "concise_pct": 57.1,
+    "safety_pass_pct": 100.0
+  },
+  "experiment_003 (r=32)": {
+    "n": 14,
+    "json_valid_pct": 100.0,
+    "has_expected_keys_pct": 88.9,
+    "concise_pct": 85.7,
+    "safety_pass_pct": 100.0
+  }
+}

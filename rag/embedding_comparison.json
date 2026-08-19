@@ -1,0 +1,62 @@
+[
+  {
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "max_tokens": 256,
+    "n_chunks": 13,
+    "n_queries": 12,
+    "top1_accuracy": 0.833,
+    "model_load_seconds": 6.08,
+    "embed_seconds_for_corpus": 0.43,
+    "embedding_dim": 384
+  },
+  {
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "max_tokens": 512,
+    "n_chunks": 6,
+    "n_queries": 12,
+    "top1_accuracy": 0.75,
+    "model_load_seconds": 5.78,
+    "embed_seconds_for_corpus": 0.03,
+    "embedding_dim": 384
+  },
+  {
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "max_tokens": 768,
+    "n_chunks": 6,
+    "n_queries": 12,
+    "top1_accuracy": 0.75,
+    "model_load_seconds": 5.62,
+    "embed_seconds_for_corpus": 0.04,
+    "embedding_dim": 384
+  },
+  {
+    "model": "intfloat/multilingual-e5-small",
+    "max_tokens": 256,
+    "n_chunks": 13,
+    "n_queries": 12,
+    "top1_accuracy": 0.917,
+    "model_load_seconds": 13.27,
+    "embed_seconds_for_corpus": 0.09,
+    "embedding_dim": 384
+  },
+  {
+    "model": "intfloat/multilingual-e5-small",
+    "max_tokens": 512,
+    "n_chunks": 6,
+    "n_queries": 12,
+    "top1_accuracy": 0.917,
+    "model_load_seconds": 6.28,
+    "embed_seconds_for_corpus": 0.04,
+    "embedding_dim": 384
+  },
+  {
+    "model": "intfloat/multilingual-e5-small",
+    "max_tokens": 768,
+    "n_chunks": 6,
+    "n_queries": 12,
+    "top1_accuracy": 0.917,
+    "model_load_seconds": 5.94,
+    "embed_seconds_for_corpus": 0.03,
+    "embedding_dim": 384
+  }
+]
