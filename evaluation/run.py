@@ -9,7 +9,7 @@ Checks per mission rule 25 (heuristic, no LLM judge — small model, offline):
     grounding against (see mission rule 27+). Revisit once RAG lands.
 
 Usage:
-    python evaluation/run.py
+    python evaluation/run.py --project-dir projects/biscuits-focus
 """
 
 from __future__ import annotations
@@ -24,41 +24,26 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_NAME = "unsloth/Llama-3.2-1B-Instruct"
-SYSTEM_PROMPT = (ROOT / "training/configs/system_prompt.txt").read_text(encoding="utf-8").strip()
-BENCHMARK_PATH = Path(__file__).parent / "benchmark.jsonl"
-REPORT_PATH = Path(__file__).parent / "report.md"
-ADAPTERS_DIR = ROOT / "models" / "adapters"
 
 
-def discover_variants() -> list[tuple[str, Path | None, str]]:
-    """(label, adapter_path, base_model) for every adapter actually on disk,
-    plus one "base (no LoRA)" entry per distinct base model in use — discovered
-    instead of hardcoded, so a new profile/config never silently drops out of
-    evaluation (see AUDIT.md 2.2). Each adapter's base model comes from its own
-    adapter_config.json, never assumed."""
-    variants: list[tuple[str, Path | None, str]] = []
-    seen_base_models: set[str] = set()
+def discover_variants(project_dir: Path) -> list[tuple[str, Path | None, str]]:
+    """(label, adapter_path, base_model) for every adapter actually on disk in
+    this project, plus one "base (no LoRA)" entry for the project's own base
+    model — discovered instead of hardcoded, so a new config never silently
+    drops out of evaluation (see AUDIT.md 2.2). Each adapter's base model comes
+    from its own adapter_config.json, never assumed."""
+    adapters_dir = project_dir / "models" / "adapters"
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    default_base_model = meta["base_model"]
 
-    for adapter_dir in sorted(ADAPTERS_DIR.iterdir()) if ADAPTERS_DIR.exists() else []:
-        config_path = adapter_dir / "adapter_config.json"
-        if not adapter_dir.is_dir() or not config_path.exists():
-            continue
-        cfg = json.loads(config_path.read_text(encoding="utf-8"))
-        base_model = cfg["base_model_name_or_path"]
-        if base_model not in seen_base_models:
-            variants.append((f"base ({base_model}, no LoRA)", None, base_model))
-            seen_base_models.add(base_model)
+    variants: list[tuple[str, Path | None, str]] = [(f"base ({default_base_model}, no LoRA)", None, default_base_model)]
 
-    for adapter_dir in sorted(ADAPTERS_DIR.iterdir()) if ADAPTERS_DIR.exists() else []:
+    for adapter_dir in sorted(adapters_dir.iterdir()) if adapters_dir.exists() else []:
         config_path = adapter_dir / "adapter_config.json"
         if not adapter_dir.is_dir() or not config_path.exists():
             continue
         cfg = json.loads(config_path.read_text(encoding="utf-8"))
         variants.append((adapter_dir.name, adapter_dir, cfg["base_model_name_or_path"]))
-
-    if not variants:
-        variants.append((f"base ({DEFAULT_MODEL_NAME}, no LoRA)", None, DEFAULT_MODEL_NAME))
 
     return variants
 
@@ -94,9 +79,9 @@ def has_unnegated_medical_claim(text: str) -> bool:
     return False
 
 
-def load_benchmark() -> list[dict]:
+def load_benchmark(benchmark_path: Path) -> list[dict]:
     items = []
-    with BENCHMARK_PATH.open("r", encoding="utf-8") as f:
+    with benchmark_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -118,9 +103,9 @@ def load_model(base_model: str, adapter_path: Path | None):
     return model
 
 
-def generate(model, tokenizer, user_text: str, max_new_tokens: int = 200) -> str:
+def generate(model, tokenizer, system_prompt: str, user_text: str, max_new_tokens: int = 200) -> str:
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text},
     ]
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -181,10 +166,21 @@ def aggregate(rows: list[dict]) -> dict:
 
 
 def main() -> None:
-    benchmark = load_benchmark()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-dir", type=Path, required=True, help="e.g. projects/biscuits-focus")
+    args = parser.parse_args()
+    project_dir: Path = args.project_dir
+
+    prompt_path = project_dir / "training" / "configs" / "system_prompt.txt"
+    system_prompt = prompt_path.read_text(encoding="utf-8").strip() if prompt_path.exists() else "Tu es un assistant utile."
+
+    benchmark_path = project_dir / "evaluation" / "benchmark.jsonl"
+    benchmark = load_benchmark(benchmark_path)
     print(f"Loaded {len(benchmark)} benchmark prompts")
 
-    variants = discover_variants()
+    variants = discover_variants(project_dir)
     print(f"Evaluating {len(variants)} variant(s): {[v[0] for v in variants]}")
 
     tokenizers: dict[str, AutoTokenizer] = {}
@@ -202,7 +198,7 @@ def main() -> None:
         model = load_model(base_model, adapter_path)
         rows = []
         for item in benchmark:
-            response = generate(model, tokenizer, item["user"])
+            response = generate(model, tokenizer, system_prompt, item["user"])
             rows.append(score(item, response))
             print(f"  [{item['id']}] {response[:80]!r}")
         all_results[label] = rows
@@ -237,12 +233,13 @@ def main() -> None:
             lines.append(f"  - response: `{r['response'][:300]}`")
         lines.append("")
 
-    REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
+    report_path = project_dir / "evaluation" / "report.md"
+    report_path.write_text("\n".join(lines), encoding="utf-8")
 
     summary_json = {label: aggregate(rows) for label, rows in all_results.items()}
-    (Path(__file__).parent / "report_summary.json").write_text(json.dumps(summary_json, indent=2), encoding="utf-8")
+    (project_dir / "evaluation" / "report_summary.json").write_text(json.dumps(summary_json, indent=2), encoding="utf-8")
 
-    print(f"\nReport written to {REPORT_PATH}")
+    print(f"\nReport written to {report_path}")
 
 
 if __name__ == "__main__":

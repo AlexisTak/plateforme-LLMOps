@@ -32,8 +32,6 @@ from transformers import AutoTokenizer, BitsAndBytesConfig, TrainerCallback
 from trl import SFTConfig, SFTTrainer
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-EXPERIMENTS_DIR = ROOT / "experiments"
-DATA_VERSION_PATH = ROOT / "data" / "VERSION"
 
 
 class JsonlLoggerCallback(TrainerCallback):
@@ -64,6 +62,7 @@ def build_dataset(path: Path):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-dir", required=True, type=Path, help="e.g. projects/biscuits-focus")
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument(
         "--resume",
@@ -72,9 +71,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    project_dir: Path = args.project_dir
+    experiments_dir = project_dir / "experiments"
+    data_version_path = project_dir / "data" / "VERSION"
+
     cfg = load_config(args.config)
     experiment_id = cfg["experiment"]["id"]
-    output_dir = ROOT / cfg["training"]["output_dir"]
+    output_dir = project_dir / cfg["training"]["output_dir"]
 
     if output_dir.exists() and any(output_dir.iterdir()):
         if not args.resume:
@@ -121,9 +124,9 @@ def main() -> None:
     )
 
     print("[2/5] loading train/validation datasets")
-    train_dataset = build_dataset(ROOT / cfg["dataset"]["train_path"])
+    train_dataset = build_dataset(project_dir / cfg["dataset"]["train_path"])
     eval_dataset = None
-    val_path = ROOT / cfg["dataset"]["validation_path"]
+    val_path = project_dir / cfg["dataset"]["validation_path"]
     if val_path.exists() and any(val_path.glob("*.jsonl")):
         eval_dataset = build_dataset(val_path)
     print(f"    train examples: {len(train_dataset)}, validation examples: {len(eval_dataset) if eval_dataset else 0}")
@@ -177,7 +180,7 @@ def main() -> None:
     peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else None
     adapter_size_mb = sum(f.stat().st_size for f in output_dir.glob("*.safetensors")) / (1024 * 1024)
 
-    EXPERIMENTS_DIR.mkdir(exist_ok=True)
+    experiments_dir.mkdir(exist_ok=True)
     result = {
         "experiment_id": experiment_id,
         "config_path": str(args.config),
@@ -187,7 +190,7 @@ def main() -> None:
         # as someone reruns scripts/prepare_dataset.py with a different version without
         # also hand-editing every config (this bit us: a sweep trained on dataset-v0.4
         # but every result still said dataset-v0.3 because the yaml was never updated).
-        "dataset_version": DATA_VERSION_PATH.read_text(encoding="utf-8").strip() if DATA_VERSION_PATH.exists() else cfg["dataset"]["version"],
+        "dataset_version": data_version_path.read_text(encoding="utf-8").strip() if data_version_path.exists() else cfg["dataset"]["version"],
         "base_model": cfg["model"]["name"],
         "lora": lora_cfg,
         "train_loss": train_result.training_loss,
@@ -197,7 +200,7 @@ def main() -> None:
         "adapter_size_mb": round(adapter_size_mb, 2),
         "output_dir": str(output_dir),
     }
-    result_path = EXPERIMENTS_DIR / f"{experiment_id}.json"
+    result_path = experiments_dir / f"{experiment_id}.json"
     result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nResult summary written to {result_path}")
     print(json.dumps(result, indent=2, ensure_ascii=False))

@@ -3,23 +3,26 @@
 __pycache__/
 *.pyc
 
-# large / generated artifacts — regenerate via scripts, don't commit
-models/base/*
-!models/base/.gitkeep
-models/merged/*
-!models/merged/.gitkeep
-models/quantized/*
-!models/quantized/.gitkeep
-rag/embeddings/*
-!rag/embeddings/.gitkeep
-rag/index/*
-!rag/index/.gitkeep
+# large / generated artifacts — regenerate via scripts, don't commit.
+# Every project is isolated under projects/<id>/ (see api/routes/projects.py),
+# so these patterns have no leading path — they must match at any depth, not
+# just at the repo root, or a project's own copies slip through untracked.
+**/models/base/*
+!**/models/base/.gitkeep
+**/models/merged/*
+!**/models/merged/.gitkeep
+**/models/quantized/*
+!**/models/quantized/.gitkeep
+**/rag/embeddings/*
+!**/rag/embeddings/.gitkeep
+**/rag/index/*
+!**/rag/index/.gitkeep
 
 # adapters are small (few MB) — keep tracked, but ignore optimizer/checkpoint junk
-models/adapters/*/checkpoint-*/
-models/adapters/*/optimizer.pt
+**/models/adapters/*/checkpoint-*/
+**/models/adapters/*/optimizer.pt
 
-experiments/*/logs/
+**/experiments/*/logs/
 *.log
 
 .env
