@@ -5,8 +5,12 @@ prints a pass/fail summary at the end. Same as always: only touches
 datasets/ / data/ / training/ / models/adapters/ — never rag/documents/.
 
 Usage:
-    python scripts/run_sweep.py --dataset-version dataset-v0.4
-    python scripts/run_sweep.py --dataset-version dataset-v0.4 --resume
+    python scripts/run_sweep.py --project-dir projects/biscuits-focus --dataset-version dataset-v0.4
+    python scripts/run_sweep.py --project-dir projects/biscuits-focus --dataset-version dataset-v0.4 --resume
+
+Requires the project to already have lora_r8.yaml / lora_r16.yaml / lora_r32.yaml
+under its training/configs/ — these aren't auto-generated for a new project, so
+create them first (via /training's "Nouvelle config", named exactly that).
 """
 
 from __future__ import annotations
@@ -24,19 +28,28 @@ SWEEP_CONFIGS = ["lora_r8.yaml", "lora_r16.yaml", "lora_r32.yaml"]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project-dir", required=True, type=Path, help="e.g. projects/biscuits-focus")
     parser.add_argument("--dataset-version", required=True)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
+    project_dir: Path = args.project_dir
     results: dict[str, bool] = {}
 
     for config_filename in SWEEP_CONFIGS:
         print(f"\n########## SWEEP: {config_filename} ##########")
+        config_path = project_dir / "training" / "configs" / config_filename
+        if not config_path.exists():
+            print(f"########## SWEEP: {config_filename} -> SKIPPED (no such config in this project) ##########")
+            results[config_filename] = False
+            continue
         cmd = [
             PYTHON,
             str(ROOT / "scripts/run_pipeline.py"),
+            "--project-dir",
+            str(project_dir),
             "--config",
-            f"training/configs/{config_filename}",
+            str(config_path),
             "--dataset-version",
             args.dataset_version,
         ]

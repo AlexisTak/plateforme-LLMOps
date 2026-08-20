@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import chat, dataset, evaluation, experiments, jobs, models, rag, system, training
+from api.routes import chat, dataset, evaluation, experiments, jobs, projects, rag, system, training
 
 app = FastAPI(title="Biscuits Focus — Management API", version="0.1.0")
 
@@ -30,7 +30,7 @@ app.include_router(jobs.router)
 app.include_router(chat.router)
 app.include_router(rag.router)
 app.include_router(system.router)
-app.include_router(models.router)
+app.include_router(projects.router)
 
 
 @app.get("/api/health")

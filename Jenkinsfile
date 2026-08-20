@@ -58,15 +58,19 @@ pipeline {
 
         stage('Contrat dataset') {
             steps {
+                // Chaque projet sous projects/ a ses propres datasets/ et data/ —
+                // le glob couvre tous les projets present sur le disque, pas
+                // seulement le projet par defaut.
+                //
                 // Les sources : erreurs bloquantes (format, revendication medicale,
                 // champs manquants). Fait echouer le build - un dataset invalide ne
                 // doit jamais atteindre un entrainement.
-                bat '"%PY%" scripts\\validate_dataset.py "datasets/**/*.jsonl"'
+                bat '"%PY%" scripts\\validate_dataset.py "projects/*/datasets/**/*.jsonl"'
 
                 // Les splits generes : --check-leakage passe les doublons entre
                 // fichiers en erreur. Une fuite train/test rend toutes les metriques
                 // d'evaluation fausses sans qu'aucune etape ne s'en apercoive.
-                bat '"%PY%" scripts\\validate_dataset.py "data/train/*.jsonl" "data/validation/*.jsonl" "data/test/*.jsonl" --check-leakage'
+                bat '"%PY%" scripts\\validate_dataset.py "projects/*/data/train/*.jsonl" "projects/*/data/validation/*.jsonl" "projects/*/data/test/*.jsonl" --check-leakage'
             }
         }
 

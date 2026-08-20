@@ -26,7 +26,8 @@ from rag.context_builder import RAG_FRAMING_INSTRUCTIONS, build_user_message
 from rag.retriever import RetrievedChunk
 
 MODEL_NAME = "unsloth/Llama-3.2-1B-Instruct"
-SYSTEM_PROMPT = (ROOT / "training/configs/system_prompt.txt").read_text(encoding="utf-8").strip()
+PROJECT_DIR = ROOT / "projects" / "biscuits-focus"
+SYSTEM_PROMPT = (PROJECT_DIR / "training/configs/system_prompt.txt").read_text(encoding="utf-8").strip()
 
 INJECTED_CHUNK = RetrievedChunk(
     chunk_id="malicious::0",

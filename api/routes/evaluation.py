@@ -1,18 +1,22 @@
-"""Trigger evaluation/run.py as a background job (see api/routes/jobs.py for status)."""
+"""Trigger evaluation/run.py as a background job for one project (see
+api/routes/jobs.py for status)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from pathlib import Path
+
+from fastapi import APIRouter, Depends
 
 from api.jobs import registry
+from api.paths import project_dir
 from api.schemas import JobStatus
 
-router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
+router = APIRouter(prefix="/api/projects/{project_id}/evaluation", tags=["evaluation"])
 
 
 @router.post("/run", response_model=JobStatus)
-def run_evaluation():
-    job = registry.start_evaluation()
+def run_evaluation(project: Path = Depends(project_dir)):
+    job = registry.start_evaluation(project)
     return JobStatus(
         job_id=job.job_id,
         kind="evaluation",
