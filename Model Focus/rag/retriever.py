@@ -5,14 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import chromadb
-from sentence_transformers import SentenceTransformer
+from rag.settings import COLLECTION_NAME, EMBEDDING_MODEL, QUERY_PREFIX
 
-from rag.index import COLLECTION_NAME, EMBEDDING_MODEL
-
-QUERY_PREFIX = "query: "  # e5 convention
-
-_model: SentenceTransformer | None = None
+_model: object | None = None
 _collections: dict[str, object] = {}  # project_dir (str) -> Chroma collection handle
 
 
@@ -25,14 +20,18 @@ class RetrievedChunk:
     score: float
 
 
-def _get_model() -> SentenceTransformer:
+def _get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
+
         _model = SentenceTransformer(EMBEDDING_MODEL)
     return _model
 
 
 def _get_collection(project_dir: Path):
+    import chromadb
+
     key = str(project_dir)
     if key not in _collections:
         index_dir = project_dir / "rag" / "index"

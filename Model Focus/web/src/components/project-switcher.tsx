@@ -5,7 +5,7 @@ import { useProject } from "@/lib/project-context";
 import { api } from "@/lib/api";
 
 export function ProjectSwitcher() {
-  const { projectId, projects, setProjectId, refresh } = useProject();
+  const { projectId, projects, loading, error: projectError, setProjectId, refresh } = useProject();
   const [open, setOpen] = useState(false);
   const [newId, setNewId] = useState("");
   const [newBaseModel, setNewBaseModel] = useState("");
@@ -32,7 +32,8 @@ export function ProjectSwitcher() {
         value={projectId ?? ""}
         onChange={(e) => setProjectId(e.target.value)}
         className="bg-surface border border-border rounded-md px-2.5 py-1 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors max-w-[220px]"
-        title="Projet actif — dataset, RAG, configs et expériences isolés par projet"
+        disabled={loading}
+        title={projectError ? `API indisponible : ${projectError}` : "Projet actif — dataset, RAG, configs et expériences isolés par projet"}
       >
         {projects.length === 0 && <option value="">aucun projet</option>}
         {projects.map((proj) => (
@@ -41,6 +42,11 @@ export function ProjectSwitcher() {
           </option>
         ))}
       </select>
+      {projectError && (
+        <button type="button" onClick={refresh} className="text-error text-xs hover:underline" title={projectError}>
+          API indisponible — réessayer
+        </button>
+      )}
       <button
         onClick={() => setOpen((v) => !v)}
         className="text-text-secondary hover:text-text-primary text-sm px-2 py-1 rounded-md hover:bg-surface-hover transition-colors"

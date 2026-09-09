@@ -20,11 +20,6 @@ import json
 import threading
 from pathlib import Path
 
-import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-
 def _default_base_model(project_dir: Path) -> str:
     """Base model used for chat/eval when no adapter is selected — the
     project's own meta.json base_model."""
@@ -73,6 +68,9 @@ class ModelManager:
         return sorted(p.name for p in adapters_dir.iterdir() if p.is_dir() and (p / "adapter_config.json").exists())
 
     def _load_base(self, base_model: str):
+        import torch
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -83,6 +81,10 @@ class ModelManager:
 
     def _load_locked(self, project_dir: Path, adapter: str | None) -> None:
         """Assumes the caller already holds self._lock."""
+        import torch
+        from peft import PeftModel
+        from transformers import AutoTokenizer
+
         key = (str(project_dir), adapter, _adapter_fingerprint(project_dir, adapter))
         base_model = resolve_base_model(project_dir, adapter)
 
@@ -123,6 +125,8 @@ class ModelManager:
         # request for a different project/adapter could unload the model
         # mid-generation.
         with self._lock:
+            import torch
+
             self._load_locked(project_dir, adapter)
             from inference.conversation import build_messages
 
