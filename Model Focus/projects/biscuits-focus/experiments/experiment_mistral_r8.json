@@ -1,0 +1,29 @@
+{
+  "experiment_id": "experiment_mistral_r8",
+  "config_path": "projects\\biscuits-focus\\training\\configs\\mistral_r8.yaml",
+  "notes": "base model swap: Mistral-7B-Instruct-v0.3, r=8, gradient checkpointing on for VRAM headroom",
+  "dataset_version": "dataset-v1.1",
+  "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "lora": {
+    "r": 8,
+    "alpha": 16,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  },
+  "train_loss": 1.2206629912058513,
+  "eval_loss": 1.761702060699463,
+  "train_duration_minutes": 125.09,
+  "peak_vram_mb": 5229.7,
+  "adapter_size_mb": 40.06,
+  "output_dir": "projects\\biscuits-focus\\models\\adapters\\experiment_mistral_r8"
+}

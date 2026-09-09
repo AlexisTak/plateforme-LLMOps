@@ -1,0 +1,7 @@
+{
+  "id": "biscuits-focus",
+  "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "label": "Biscuits Focus (Mistral 7B)",
+  "ollama_equivalent": "mistral:7b-instruct-v0.3-q4_K_M",
+  "added_at": "2026-08-17T19:46:21.333615+00:00"
+}
