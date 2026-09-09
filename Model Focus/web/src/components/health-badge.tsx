@@ -8,7 +8,7 @@ export function HealthBadge() {
   const [ok, setOk] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const check = () => api.systemHealth().then((h) => setOk(h.ok)).catch(() => setOk(null));
+    const check = () => api.health().then((h) => setOk(h.status === "ok")).catch(() => setOk(null));
     check();
     const interval = setInterval(check, 15000);
     return () => clearInterval(interval);
