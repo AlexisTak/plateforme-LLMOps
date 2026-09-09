@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BiscuitsFocusStructuredOutput",
+  "description": "Structured output schema for Biscuits Focus. Only used when the router selects 'structured' mode; free conversation responses are plain text and are NOT validated against this schema.",
+  "type": "object",
+  "properties": {
+    "intent": {
+      "type": "string",
+      "enum": ["task_breakdown", "next_action", "prioritization", "overwhelm", "energy", "resume", "capture", "safety_redirect"]
+    },
+    "energy": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "unknown"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "next_action": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "duration_minutes": { "type": "integer", "minimum": 0 },
+        "difficulty": { "type": "string", "enum": ["low", "medium", "high"] },
+        "tip": { "type": "string", "description": "One concrete, specific trick to make starting this action easier — not generic encouragement." }
+      },
+      "required": ["title"]
+    },
+    "tasks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tips": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Parallel to `tasks` (same order, same length when both present): one concrete, actionable trick per task — a shortcut, a way to lower the barrier to starting, or a common pitfall to avoid. Never generic filler like 'courage' or 'tu peux le faire'."
+    },
+    "needs_clarification": {
+      "type": "boolean"
+    }
+  },
+  "required": ["intent"],
+  "additionalProperties": false
+}

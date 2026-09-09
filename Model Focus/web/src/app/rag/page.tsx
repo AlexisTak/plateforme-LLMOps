@@ -1,0 +1,278 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagDocument, RagSearchResult } from "@/lib/api";
+import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { useProject } from "@/lib/project-context";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  methods: "Méthodes d'organisation",
+  research: "Études / recherche",
+  product: "Documentation produit",
+  other: "Autre",
+};
+
+function CategorySelect({ value, onChange }: { value: RagCategory; onChange: (v: RagCategory) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as RagCategory)}
+      className="bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+    >
+      {RAG_CATEGORIES.map((c) => (
+        <option key={c} value={c}>
+          {CATEGORY_LABELS[c]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export default function RagPage() {
+  const { projectId } = useProject();
+  const [documents, setDocuments] = useState<RagDocument[]>([]);
+  const [reindexJob, setReindexJob] = useState<JobStatus | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [uploadCategory, setUploadCategory] = useState<RagCategory>("research");
+  const [newFilename, setNewFilename] = useState("");
+  const [newCategory, setNewCategory] = useState<RagCategory>("other");
+  const [newContent, setNewContent] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<RagSearchResult[] | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const refresh = () => {
+    if (!projectId) return;
+    api.rag.documents(projectId).then(setDocuments);
+  };
+
+  useEffect(() => {
+    refresh();
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!reindexJob || reindexJob.status !== "running") return;
+    const interval = setInterval(async () => {
+      const updated = await api.jobs.get(reindexJob.job_id);
+      setReindexJob(updated);
+      if (updated.status !== "running") {
+        clearInterval(interval);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [reindexJob]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, RagDocument[]>();
+    for (const doc of documents) {
+      if (!map.has(doc.category)) map.set(doc.category, []);
+      map.get(doc.category)!.push(doc);
+    }
+    return map;
+  }, [documents]);
+
+  const trackReindexJob = (jobId: string | null | undefined) => {
+    if (!jobId) return;
+    api.jobs.get(jobId).then(setReindexJob);
+  };
+
+  const handlePaste = async () => {
+    if (!newFilename.trim() || !newContent.trim() || !projectId) return;
+    const filename = newFilename.trim().endsWith(".md") ? newFilename.trim() : `${newFilename.trim()}.md`;
+    setError(null);
+    try {
+      const doc = await api.rag.createDocument(projectId, filename, newCategory, newContent);
+      setNewFilename("");
+      setNewContent("");
+      trackReindexJob(doc.reindex_job_id);
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!projectId) return;
+    setError(null);
+    setUploading(true);
+    try {
+      const doc = await api.rag.uploadDocument(projectId, file, uploadCategory);
+      trackReindexJob(doc.reindex_job_id);
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (category: string, filename: string) => {
+    if (!projectId) return;
+    if (!confirm(`Supprimer ${filename} ?`)) return;
+    const res = await api.rag.deleteDocument(projectId, category, filename);
+    trackReindexJob(res.reindex_job_id);
+    refresh();
+  };
+
+  const handleReindex = async () => {
+    if (!projectId) return;
+    setError(null);
+    try {
+      const job = await api.rag.reindex(projectId);
+      setReindexJob(job);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!query.trim() || !projectId) return;
+    setResults(await api.rag.search(projectId, query, 3));
+  };
+
+  return (
+    <div className="space-y-10">
+      <PageHeader
+        title="RAG"
+        description="Ajouter des documents de connaissance (méthodes, études, docs produit) — l'index se reconstruit automatiquement à chaque ajout/suppression."
+        action={
+          <div className="flex items-center gap-3">
+            {reindexJob?.status === "running" && <StatusBadge status="running" />}
+            <Button variant="ghost" onClick={handleReindex} disabled={reindexJob?.status === "running"}>
+              Forcer une reconstruction
+            </Button>
+          </div>
+        }
+      />
+
+      {error && <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>}
+      {reindexJob?.status === "running" && (
+        <Card className="border-info/30 bg-info-soft text-text-secondary text-sm">
+          Index en reconstruction automatique (job {reindexJob.job_id})…
+        </Card>
+      )}
+      {reindexJob?.status === "completed" && (
+        <Card className="border-success/30 bg-success-soft text-success text-sm">
+          Index à jour (job {reindexJob.job_id}).
+        </Card>
+      )}
+      {reindexJob?.status === "failed" && (
+        <Card className="border-error/30 bg-error-soft text-error text-sm">
+          Échec de la reconstruction automatique de l&apos;index (job {reindexJob.job_id}) — voir les logs du serveur.
+        </Card>
+      )}
+
+      {grouped.has("research") && (
+        <Card className="border-info/30 bg-info-soft text-text-secondary text-sm">
+          Les documents « Études / recherche » sont du contexte informationnel — le modèle ne les utilise jamais pour
+          poser un diagnostic ou recommander un traitement (garde-fou au niveau du system prompt et du dataset
+          safety, pas du contenu récupéré). Voir <code className="font-mono text-text-primary">rag/documents/README.md</code>.
+        </Card>
+      )}
+
+      {RAG_CATEGORIES.map((cat) => {
+        const docs = grouped.get(cat) ?? [];
+        if (docs.length === 0) return null;
+        return (
+          <section key={cat}>
+            <SectionTitle>
+              {CATEGORY_LABELS[cat]} ({docs.length})
+            </SectionTitle>
+            <div className="space-y-2">
+              {docs.map((doc) => (
+                <Card key={`${doc.category}/${doc.filename}`} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Pill>{doc.filename}</Pill>
+                    <div className="flex items-center gap-3">
+                      <span className="text-text-muted text-xs font-mono">{doc.char_count} chars</span>
+                      <button
+                        onClick={() => handleDelete(doc.category, doc.filename)}
+                        className="text-error/80 hover:text-error text-xs font-medium transition-colors"
+                      >
+                        Supprimer
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-text-secondary text-sm leading-relaxed line-clamp-2">{doc.preview}</p>
+                </Card>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+      {documents.length === 0 && <EmptyState>Aucun document. Ajoute-en un ci-dessous.</EmptyState>}
+
+      <section className="border-t border-border pt-6 space-y-6">
+        <SectionTitle>Ajouter un document</SectionTitle>
+
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-text-secondary text-sm">Envoyer un fichier — PDF, TXT ou MD (25 MB max, texte extrait automatiquement)</p>
+            <CategorySelect value={uploadCategory} onChange={setUploadCategory} />
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.txt,.md"
+            disabled={uploading}
+            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+            className="text-sm text-text-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-surface-hover file:text-text-primary file:text-sm hover:file:bg-border cursor-pointer disabled:opacity-50"
+          />
+          {uploading && <p className="text-text-muted text-xs">Extraction du texte…</p>}
+        </Card>
+
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-text-secondary text-sm">…ou coller le texte directement</p>
+            <CategorySelect value={newCategory} onChange={setNewCategory} />
+          </div>
+          <Input value={newFilename} onChange={setNewFilename} placeholder="nom_du_document.md" />
+          <textarea
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            placeholder="# Titre&#10;&#10;Contenu du document en markdown…"
+            rows={6}
+            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors font-mono"
+          />
+          <Button onClick={handlePaste}>Ajouter</Button>
+        </Card>
+      </section>
+
+      <section className="border-t border-border pt-6">
+        <SectionTitle>Tester la recherche</SectionTitle>
+        <div className="flex gap-2 mb-4">
+          <Input
+            value={query}
+            onChange={setQuery}
+            placeholder="Ex : comment prioriser urgent et important ?"
+            className="flex-1"
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+          <Button onClick={handleSearch}>Chercher</Button>
+        </div>
+        {results && (
+          <div className="space-y-2">
+            {results.length === 0 && <EmptyState>Aucun résultat au-dessus du seuil.</EmptyState>}
+            {results.map((r) => (
+              <Card key={r.chunk_id} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Pill>{r.doc_id}</Pill>
+                    <span className="text-text-muted text-xs">{CATEGORY_LABELS[r.category] ?? r.category}</span>
+                  </div>
+                  <span className="text-accent text-xs font-mono">{r.score.toFixed(3)}</span>
+                </div>
+                <p className="text-text-secondary text-sm leading-relaxed line-clamp-3">{r.text}</p>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

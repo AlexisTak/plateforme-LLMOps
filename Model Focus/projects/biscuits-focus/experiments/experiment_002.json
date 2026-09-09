@@ -1,0 +1,29 @@
+{
+  "experiment_id": "experiment_002",
+  "config_path": "projects\\biscuits-focus\\training\\configs\\lora_r8.yaml",
+  "notes": "r=8, lighter adapter, expect faster/smaller but possibly underfits behavior nuance",
+  "dataset_version": "dataset-v0.8",
+  "base_model": "unsloth/Llama-3.2-1B-Instruct",
+  "lora": {
+    "r": 8,
+    "alpha": 16,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  },
+  "train_loss": 1.4509481778220525,
+  "eval_loss": 1.73076331615448,
+  "train_duration_minutes": 7.56,
+  "peak_vram_mb": 2532.8,
+  "adapter_size_mb": 10.78,
+  "output_dir": "projects\\biscuits-focus\\models\\adapters\\experiment_002"
+}
