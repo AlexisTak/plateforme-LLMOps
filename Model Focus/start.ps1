@@ -36,6 +36,15 @@ function Test-Port {
     return $null -ne $conn
 }
 
+function Test-ApiHealth {
+    try {
+        $resp = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2 -ErrorAction Stop
+        return $resp.status -eq "ok"
+    } catch {
+        return $false
+    }
+}
+
 # --- Ollama --------------------------------------------------------------
 
 if (Test-Port -Port 11434) {
@@ -53,17 +62,36 @@ if (Test-Port -Port 11434) {
 
 # --- FastAPI backend -------------------------------------------------------
 
-$apiJustStarted = $false
-if (Test-Port -Port 8000) {
-    Write-Host "API already running on :8000 - leaving it as is." -ForegroundColor Yellow
+if (Test-ApiHealth) {
+    Write-Host "API already healthy on 127.0.0.1:8000 - leaving it as is." -ForegroundColor Yellow
+} elseif (Test-Port -Port 8000) {
+    Write-Host "Port 8000 is occupied, but Biscuits Focus API is not healthy." -ForegroundColor Red
+    Write-Host "Stop the process using this port, then run start.ps1 again." -ForegroundColor Red
+    exit 1
 } else {
     Write-Host "Starting API on :8000..." -ForegroundColor Cyan
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "cd '$root'; & '$venvPython' -m uvicorn api.main:app --port 8000"
+        "cd '$root'; & '$venvPython' -m uvicorn api.main:app --host 127.0.0.1 --port 8000"
     )
-    $apiJustStarted = $true
 }
+
+# --- Wait for API health before starting the web console -------------------
+
+Write-Host "Waiting for API to become healthy..." -NoNewline
+$healthy = $false
+for ($i = 0; $i -lt 90; $i++) {
+    if (Test-ApiHealth) { $healthy = $true; break }
+    Write-Host "." -NoNewline
+    Start-Sleep -Seconds 1
+}
+Write-Host ""
+
+if (-not $healthy) {
+    Write-Host "API did not respond within 90s - check its window for errors." -ForegroundColor Red
+    exit 1
+}
+Write-Host "API healthy." -ForegroundColor Green
 
 # --- Next.js console -------------------------------------------------------
 
@@ -75,28 +103,6 @@ if (Test-Port -Port 3000) {
         "-NoExit", "-Command",
         "cd '$root\web'; npm run dev"
     )
-}
-
-# --- Wait for API health (only if we just started it), then open browser ---
-
-if ($apiJustStarted) {
-    Write-Host "Waiting for API to become healthy..." -NoNewline
-    $healthy = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
-            if ($resp.StatusCode -eq 200) { $healthy = $true; break }
-        } catch {}
-        Write-Host "." -NoNewline
-        Start-Sleep -Seconds 1
-    }
-    Write-Host ""
-
-    if ($healthy) {
-        Write-Host "API healthy." -ForegroundColor Green
-    } else {
-        Write-Host "API did not respond within 30s - check its window for errors." -ForegroundColor Red
-    }
 }
 
 if (-not $NoBrowser) {

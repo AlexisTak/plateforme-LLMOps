@@ -16,19 +16,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import chromadb
-from sentence_transformers import SentenceTransformer
-
 from rag.chunker import chunk_all_documents
-
-COLLECTION_NAME = "docs"
-EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
-CHUNK_MAX_TOKENS = 512
-CHUNK_OVERLAP_TOKENS = 50
-PASSAGE_PREFIX = "passage: "  # e5 convention
+from rag.settings import COLLECTION_NAME, EMBEDDING_MODEL, CHUNK_MAX_TOKENS, CHUNK_OVERLAP_TOKENS, PASSAGE_PREFIX
 
 
 def build_index(project_dir: Path) -> tuple[int, int]:
+    import chromadb
+    from sentence_transformers import SentenceTransformer
+
     documents_dir = project_dir / "rag" / "documents"
     index_dir = project_dir / "rag" / "index"
 

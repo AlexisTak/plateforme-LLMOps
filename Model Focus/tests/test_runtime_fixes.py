@@ -133,6 +133,20 @@ def test_chat_api_forwards_context_and_rejects_foreign_adapter(monkeypatch, proj
         assert client.post("/api/projects/test/chat", json=body).status_code == 422
 
 
+@pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:3000"])
+def test_local_browser_origins_are_allowed(origin):
+    from fastapi.testclient import TestClient
+    from api.main import app
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/projects",
+            headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+        )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_generation_drops_oldest_pairs_to_fit_token_budget(monkeypatch, project):
     import torch
     from types import SimpleNamespace
