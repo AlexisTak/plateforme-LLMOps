@@ -128,33 +128,51 @@ def find_near_duplicates(
     examples: list[tuple[dict, str, int]],
     threshold: float = 0.9,
 ) -> tuple[list[tuple[str, int, str, int, float]], bool]:
-    """Pairwise near-duplicate scan (SequenceMatcher ratio) across all examples.
+    """Near-duplicate scan using a fast TF-IDF candidate index, followed by
+    the existing SequenceMatcher ratio for the final decision.
 
     Informative only — does not remove anything. Returns (pairs, skipped),
-    where each pair is (file_a, line_a, file_b, line_b, similarity), and
-    `skipped` is True if the dataset was too large to scan exhaustively.
+    where each pair is (file_a, line_a, file_b, line_b, similarity). The
+    candidate threshold is deliberately permissive so formatting variants
+    still reach the precise comparison without evaluating every possible pair.
     """
     n = len(examples)
     if n * (n - 1) // 2 > MAX_NEAR_DUP_PAIRS_SCANNED:
         return [], True
 
+    if n < 2:
+        return [], False
+
     texts = [full_text(obj) for obj, _, _ in examples]
+
+    # Import locally: sklearn is only needed when a user explicitly launches
+    # validation, so it must not slow down API startup or ordinary requests.
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    vectors = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), lowercase=True).fit_transform(texts)
+    similarities = vectors @ vectors.T
+    rows, cols = similarities.nonzero()
+    candidate_pairs = {
+        (int(i), int(j))
+        for i, j in zip(rows, cols)
+        if i < j and similarities[i, j] >= 0.4
+    }
+
     pairs: list[tuple[str, int, str, int, float]] = []
     matcher = difflib.SequenceMatcher(autojunk=False)
-    for i in range(n):
+    for i, j in sorted(candidate_pairs):
         matcher.set_seq2(texts[i])
-        for j in range(i + 1, n):
-            if abs(len(texts[i]) - len(texts[j])) > max(len(texts[i]), len(texts[j])) * (1 - threshold) + 20:
-                continue  # length gap alone rules out reaching `threshold`
-            matcher.set_seq1(texts[j])
-            ratio = matcher.quick_ratio()
-            if ratio < threshold:
-                continue
-            ratio = matcher.ratio()
-            if ratio >= threshold:
-                _, file_a, line_a = examples[i]
-                _, file_b, line_b = examples[j]
-                pairs.append((file_a, line_a, file_b, line_b, round(ratio, 3)))
+        if abs(len(texts[i]) - len(texts[j])) > max(len(texts[i]), len(texts[j])) * (1 - threshold) + 20:
+            continue  # length gap alone rules out reaching `threshold`
+        matcher.set_seq1(texts[j])
+        ratio = matcher.quick_ratio()
+        if ratio < threshold:
+            continue
+        ratio = matcher.ratio()
+        if ratio >= threshold:
+            _, file_a, line_a = examples[i]
+            _, file_b, line_b = examples[j]
+            pairs.append((file_a, line_a, file_b, line_b, round(ratio, 3)))
     return pairs, False
 
 

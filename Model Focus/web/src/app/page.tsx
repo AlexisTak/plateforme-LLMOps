@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetStats, EvalSummaryMetric, EvaluationReport, ExperimentResult, JobStatus, RagDocument, ValidationResult } from "@/lib/api";
+import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetStats, EvalSummaryMetric, EvaluationReport, ExperimentResult, JobStatus, RagDocument } from "@/lib/api";
 import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
 import { BarChart } from "@/components/bar-chart";
 import { useProject } from "@/lib/project-context";
@@ -27,18 +27,17 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
   const [datasetStats, setDatasetStats] = useState<DatasetStats | null>(null);
   const [datasetCategories, setDatasetCategories] = useState<DatasetCategorySummary[] | null>(null);
   const [ragDocuments, setRagDocuments] = useState<RagDocument[] | null>(null);
-  const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [evalSummary, setEvalSummary] = useState<Record<string, EvalSummaryMetric> | null>(null);
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [trainingError, setTrainingError] = useState<string | null>(null);
+  const hadRunningJobs = useRef(false);
 
-  const refreshAll = () => {
-    if (!projectId) return;
+  const refreshData = useCallback(() => {
     api.experiments
       .list(projectId)
-      .then(setExperiments)
+      .then((items) => { setExperiments(items); setError(null); })
       .catch((e) => setError(String(e)));
     api.experiments
       .report(projectId)
@@ -47,22 +46,34 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
     api.dataset.stats(projectId).then(setDatasetStats).catch(() => {});
     api.dataset.categories(projectId).then(setDatasetCategories).catch(() => {});
     api.rag.documents(projectId).then(setRagDocuments).catch(() => {});
-    api.dataset.validate(projectId).then(setValidation).catch(() => {});
     api.dataset.currentVersion(projectId).then(setCurrentVersion).catch(() => {});
     api.experiments.reportSummary(projectId).then(setEvalSummary).catch(() => setEvalSummary(null));
-    api.jobs.list(projectId).then((j) => setJobs(j.slice(0, 5))).catch(() => {});
-  };
+  }, [projectId]);
+
+  const refreshJobs = useCallback(() => {
+    api.jobs.list(projectId).then((items) => {
+      const recent = items.slice(0, 5);
+      const hasRunningJobs = recent.some((job) => job.status === "running");
+      setJobs(recent);
+      if (hadRunningJobs.current && !hasRunningJobs) refreshData();
+      hadRunningJobs.current = hasRunningJobs;
+    }).catch(() => {});
+  }, [projectId, refreshData]);
+
+  const refreshAll = useCallback(() => {
+    refreshData();
+    refreshJobs();
+  }, [refreshData, refreshJobs]);
 
   useEffect(() => {
     refreshAll();
-    if (!projectId) return;
-    const interval = setInterval(refreshAll, 5000);
+    const interval = setInterval(refreshJobs, 5000);
     window.addEventListener("focus", refreshAll);
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", refreshAll);
     };
-  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshAll, refreshJobs]);
 
   const trainCurrentVersion = async () => {
     if (!currentVersion?.version || !projectId) return;
@@ -105,11 +116,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
         <Card>
           <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Exemples dataset</p>
           <p className="font-display text-3xl text-text-primary">{datasetStats?.total_examples ?? "—"}</p>
-          {validation && (
-            <p className={`text-xs mt-1 ${validation.errors > 0 ? "text-error" : "text-success"}`}>
-              {validation.errors > 0 ? `${validation.errors} erreur(s)` : "valide"}
-            </p>
-          )}
+          <p className="text-text-muted text-xs mt-1">{datasetStats ? `${datasetStats.exact_duplicates} doublon(s) exact(s)` : "\u00a0"}</p>
         </Card>
         <Card>
           <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Documents RAG</p>

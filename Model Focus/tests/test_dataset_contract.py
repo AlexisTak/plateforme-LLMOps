@@ -13,6 +13,7 @@ Covers the two things that silently corrupt an experiment if they break:
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -70,6 +71,31 @@ def test_example_key_is_stable_and_distinguishes_content():
     c = validate_mod.example_key(_example(user="Autre chose"))
     assert a == b, "same content must hash identically (dedupe relies on this)"
     assert a != c
+
+
+def test_near_duplicate_scan_finds_close_text_without_false_positive():
+    examples = [
+        (_example(user="Je suis débordé par toutes mes tâches aujourd'hui"), "a.jsonl", 1),
+        (_example(user="Je suis débordé par toutes mes tâches aujourd’hui !"), "b.jsonl", 2),
+        (_example(user="Comment préparer un gâteau au chocolat ?", assistant="Mélange les ingrédients."), "c.jsonl", 3),
+    ]
+
+    pairs, skipped = validate_mod.find_near_duplicates(examples, threshold=0.85)
+
+    assert not skipped
+    assert [(pair[0], pair[2]) for pair in pairs] == [("a.jsonl", "b.jsonl")]
+
+
+def test_near_duplicate_scan_handles_a_dashboard_sized_dataset_quickly():
+    examples = [
+        (_example(user=hashlib.sha256(f"user-{i}".encode()).hexdigest(), assistant=hashlib.sha256(f"assistant-{i}".encode()).hexdigest()), "data.jsonl", i + 1)
+        for i in range(600)
+    ]
+
+    pairs, skipped = validate_mod.find_near_duplicates(examples)
+
+    assert not skipped
+    assert pairs == []
 
 
 # --- prepare_dataset --------------------------------------------------------
