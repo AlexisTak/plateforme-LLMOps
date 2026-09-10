@@ -87,11 +87,11 @@ export default function DocsPage() {
           </p>
         </Card>
         <Card className="border-accent/30 bg-accent-soft/40 space-y-3">
-          <p className="text-accent-strong text-xs uppercase tracking-wide font-medium">Ce que l’application ne fait pas</p>
+          <p className="text-accent-strong text-xs uppercase tracking-wide font-medium">Comment la qualité est vérifiée</p>
           <p className="text-sm text-text-secondary leading-relaxed">
-            Elle ne crée pas un grand modèle depuis zéro et ne garantit pas la qualité d’une réponse uniquement parce
-            que la loss baisse. Elle aide à produire, mesurer et comparer un assistant spécialisé. Les résultats du
-            benchmark et les essais dans le chat restent indispensables.
+            Une baisse de la loss confirme que le modèle apprend, mais la console ne s’arrête pas à ce chiffre. Elle
+            compare la loss de validation, les résultats du benchmark et les réponses produites sur de nouvelles
+            demandes. Ces contrôles permettent de choisir le modèle qui répond réellement le mieux à la mission.
           </p>
           <p className="text-sm text-text-secondary leading-relaxed">
             La mission et les limites dépendent du projet : agent IA, assistant de développement, aide aux entreprises
