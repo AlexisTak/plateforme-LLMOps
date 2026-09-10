@@ -1,9 +1,7 @@
 """RAG document management + retrieval testing, scoped to one project.
 
 Documents live under projects/<id>/rag/documents/<category>/*.md — category is
-one of "methods" (organizational techniques), "research" (studies/papers —
-informational only, never used by the model to diagnose or treat, see
-rag/documents/README.md), "product" or "other". Upload accepts PDF, TXT and MD
+one of "methods", "research", "product" or "other". Upload accepts PDF, TXT and MD
 (see rag/ingest.py). Reindexing runs as a background job (api/jobs.py) so
 uploading many or large documents doesn't block the request or hit an HTTP
 timeout. Every project has its own Chroma index — nothing here is shared.

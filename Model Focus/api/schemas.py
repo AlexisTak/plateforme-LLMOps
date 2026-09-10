@@ -1,4 +1,4 @@
-"""Pydantic request/response models for the Biscuits Focus API."""
+"""Pydantic request/response models for the model-building console API."""
 
 from __future__ import annotations
 
@@ -260,6 +260,9 @@ class Project(BaseModel):
     id: str  # filesystem-safe slug, also the unique key — e.g. "biscuits-focus"
     base_model: str  # HF repo id used for training/inference in this project
     label: str
+    project_type: Literal["general", "agent", "developer", "business"] = "general"
+    purpose: str = "Assistant généraliste"
+    output_mode: Literal["natural", "json", "flexible"] = "natural"
     ollama_equivalent: str | None = None
     added_at: str
     dataset_examples: int = 0
@@ -271,4 +274,8 @@ class CreateProjectRequest(BaseModel):
     id: str
     base_model: str
     label: str | None = None
+    project_type: Literal["general", "agent", "developer", "business"] = "general"
+    purpose: str = Field(min_length=3, max_length=2000)
+    output_mode: Literal["natural", "json", "flexible"] = "natural"
+    system_prompt: str | None = Field(default=None, max_length=12000)
     ollama_equivalent: str | None = None

@@ -1,7 +1,7 @@
 """Benchmark base model vs each trained LoRA adapter on evaluation/benchmark.jsonl.
 
 Checks (heuristic, no LLM judge — small model, offline):
-  - plain_text: non-empty natural-text format, consistent with runtime instructions
+  - output format: natural text or JSON, according to the project setting
   - concision: response length under a per-prompt budget
   - safety: refusal signal present + no medical diagnosis/dosage claim, on safety prompts
   - action quality and RAG grounding: not measured by these format heuristics;
@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import sys
 
 sys.path.insert(0, str(ROOT))
-from inference.router import PLAIN_TEXT_SUFFIX
+from inference.router import output_suffix
 from evaluation.reports import capture_metadata, save_report
 
 
@@ -121,7 +121,7 @@ def generate(model, tokenizer, system_prompt: str, user_text: str, max_new_token
     return tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 
 
-def score(item: dict, response: str) -> dict:
+def score(item: dict, response: str, output_mode: str = "natural") -> dict:
     checks = item["checks"]
     result = {"id": item["id"], "category": item["category"], "response": response}
 
@@ -133,16 +133,26 @@ def score(item: dict, response: str) -> dict:
         except json.JSONDecodeError:
             parsed = None
 
-    # Runtime is always plain text. Legacy expect_json flags must not penalize
-    # the very format that the generation prompt explicitly requests.
-    result["json_valid"] = None
-    result["has_expected_keys"] = None
-    try:
-        json.loads(stripped)
-        is_json = True
-    except (ValueError, TypeError):
-        is_json = False
-    result["plain_text"] = bool(stripped) and not is_json and not stripped.startswith(("{", "[", "```"))
+    if output_mode == "json":
+        result["json_valid"] = parsed is not None
+        expected_keys = checks.get("expect_keys", [])
+        result["has_expected_keys"] = parsed is not None and all(key in parsed for key in expected_keys)
+        result["plain_text"] = None
+    elif output_mode == "flexible":
+        result["json_valid"] = None
+        result["has_expected_keys"] = None
+        result["plain_text"] = None
+    else:
+        # Natural mode preserves the contract of existing projects, including
+        # benchmarks that still contain old expect_json flags.
+        result["json_valid"] = None
+        result["has_expected_keys"] = None
+        try:
+            json.loads(stripped)
+            is_json = True
+        except (ValueError, TypeError):
+            is_json = False
+        result["plain_text"] = bool(stripped) and not is_json and not stripped.startswith(("{", "[", "```"))
 
     result["concise"] = bool(stripped) and len(response) <= checks["max_chars"]
 
@@ -183,6 +193,8 @@ def main() -> None:
     args = parser.parse_args()
     project_dir: Path = args.project_dir
     metadata = capture_metadata(project_dir)
+    project_meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    output_mode = project_meta.get("output_mode", "natural")
 
     prompt_path = project_dir / "training" / "configs" / "system_prompt.txt"
     system_prompt = prompt_path.read_text(encoding="utf-8").strip() if prompt_path.exists() else "Tu es un assistant utile."
@@ -209,18 +221,19 @@ def main() -> None:
         model = load_model(base_model, adapter_path)
         rows = []
         for item in benchmark:
-            # Match the runtime's plain-text contract for every category.
-            item_prompt = system_prompt + PLAIN_TEXT_SUFFIX
+            # Match the output contract used by the runtime for this project.
+            item_prompt = system_prompt + output_suffix(output_mode)
             response = generate(model, tokenizer, item_prompt, item["user"])
-            rows.append(score(item, response))
+            rows.append(score(item, response, output_mode=output_mode))
             print(f"  [{item['id']}] {response[:80]!r}")
         all_results[label] = rows
         del model
         gc.collect()
         torch.cuda.empty_cache()
 
-    lines = ["# Evaluation Report — Biscuits Focus\n"]
-    lines.append(f"Benchmark: {len(benchmark)} prompts across task_breakdown, next_action, overwhelm, prioritization, energy, resume, safety, conversation.\n")
+    lines = [f"# Evaluation Report — {project_meta.get('label', project_dir.name)}\n"]
+    categories = ", ".join(sorted({item.get("category", "other") for item in benchmark}))
+    lines.append(f"Benchmark: {len(benchmark)} prompts across {categories or 'no category'}.\n")
     lines.append(f"Generated: {metadata['generated_at']} | Dataset: {metadata['dataset_version']} | Scoring: {metadata['scoring_version']}\n")
     lines.append("Automated checks measure text format, concision and refusal signals only. Action clarity and feasibility require human review. RAG grounding is not evaluated by this benchmark.\n")
 

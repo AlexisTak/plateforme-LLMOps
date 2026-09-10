@@ -43,7 +43,14 @@ class Finding:
         return f"[{self.level.upper()}] {self.file}:{self.line} — {self.message}"
 
 
-def validate_example(obj: dict, file: str, line_no: int) -> list[Finding]:
+def validate_example(
+    obj: dict,
+    file: str,
+    line_no: int,
+    *,
+    medical_safety: bool = True,
+    max_assistant_chars: int = MAX_ASSISTANT_CHARS,
+) -> list[Finding]:
     findings: list[Finding] = []
 
     if not isinstance(obj, dict) or "messages" not in obj:
@@ -70,9 +77,9 @@ def validate_example(obj: dict, file: str, line_no: int) -> list[Finding]:
             continue
 
         if role == "assistant":
-            if len(content) > MAX_ASSISTANT_CHARS:
+            if len(content) > max_assistant_chars:
                 findings.append(
-                    Finding(file, line_no, "warning", f"assistant response too long ({len(content)} chars > {MAX_ASSISTANT_CHARS})")
+                    Finding(file, line_no, "warning", f"assistant response too long ({len(content)} chars > {max_assistant_chars})")
                 )
             stripped = content.strip()
             if stripped.startswith("{"):
@@ -80,9 +87,10 @@ def validate_example(obj: dict, file: str, line_no: int) -> list[Finding]:
                     json.loads(stripped)
                 except json.JSONDecodeError as e:
                     findings.append(Finding(file, line_no, "error", f"assistant content looks like JSON but is invalid: {e}"))
-            for pat in MEDICAL_CLAIM_PATTERNS:
-                if pat.search(content):
-                    findings.append(Finding(file, line_no, "error", f"possible medical diagnosis/prescription claim: matched {pat.pattern!r}"))
+            if medical_safety:
+                for pat in MEDICAL_CLAIM_PATTERNS:
+                    if pat.search(content):
+                        findings.append(Finding(file, line_no, "error", f"possible medical diagnosis/prescription claim: matched {pat.pattern!r}"))
 
         for pat in SENSITIVE_PATTERNS:
             if pat.search(content):

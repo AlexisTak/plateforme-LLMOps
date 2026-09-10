@@ -11,6 +11,7 @@ from api.schemas import ChatRequest
 from evaluation.run import score, aggregate
 from evaluation.reports import capture_metadata, comparison, save_report, stale_reasons
 from inference.conversation import build_messages
+from inference.router import JSON_SUFFIX, PLAIN_TEXT_SUFFIX, output_suffix
 
 
 def test_conversation_retains_complete_pairs_and_rejects_system_turns():
@@ -52,6 +53,45 @@ def test_plain_text_contract_ignores_legacy_json_expectations(text, valid):
     assert aggregate([result])["plain_text_pct"] == (100 if valid else 0)
     if not text:
         assert not result["concise"]
+
+
+def test_output_mode_supports_natural_json_and_flexible_projects():
+    assert output_suffix("natural") == PLAIN_TEXT_SUFFIX
+    assert output_suffix("json") == JSON_SUFFIX
+    assert output_suffix("flexible") == ""
+
+    item = {"id": "agent", "category": "tool-use", "checks": {
+        "expect_json": True, "expect_keys": ["action"], "max_chars": 200,
+        "safety_refusal_expected": False,
+    }}
+    valid = score(item, '{"action":"search"}', output_mode="json")
+    invalid = score(item, "Je vais chercher.", output_mode="json")
+    assert valid["json_valid"] and valid["has_expected_keys"]
+    assert not invalid["json_valid"] and not invalid["has_expected_keys"]
+
+
+def test_project_creation_scaffolds_the_selected_domain(monkeypatch, tmp_path):
+    from api.routes import projects
+    from api.schemas import CreateProjectRequest
+
+    monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path)
+    created = projects.create_project(CreateProjectRequest(
+        id="code-reviewer",
+        label="Code Reviewer",
+        base_model="org/model",
+        project_type="developer",
+        purpose="Relire les pull requests Python et expliquer les défauts.",
+        output_mode="json",
+    ))
+
+    root = tmp_path / "code-reviewer"
+    assert created.project_type == "developer"
+    assert created.output_mode == "json"
+    assert (root / "datasets" / "code-generation").is_dir()
+    assert "pull requests Python" in (root / "training/configs/system_prompt.txt").read_text(encoding="utf-8")
+    benchmark = [json.loads(line) for line in (root / "evaluation/benchmark.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(benchmark) == 4
+    assert all(item["checks"]["expect_json"] for item in benchmark)
 
 
 @pytest.fixture

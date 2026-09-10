@@ -65,6 +65,17 @@ def test_medical_claim_in_assistant_turn_is_flagged():
     assert findings, "a diagnosis claim in an assistant turn was not flagged at all"
 
 
+def test_domain_neutral_project_can_disable_medical_specific_validation():
+    findings = validate_mod.validate_example(
+        _example(assistant="Je te diagnostique une panne du service HTTP."),
+        "developer.jsonl",
+        1,
+        medical_safety=False,
+        max_assistant_chars=8000,
+    )
+    assert "error" not in _levels(findings)
+
+
 def test_example_key_is_stable_and_distinguishes_content():
     a = validate_mod.example_key(_example())
     b = validate_mod.example_key(_example())

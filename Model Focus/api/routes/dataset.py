@@ -134,6 +134,11 @@ def validate_all(project: Path = Depends(project_dir)):
     total_examples = 0
     seen_hashes: dict[str, list[str]] = {}
     all_examples: list[tuple[dict, str, int]] = []
+    meta_path = project / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    # Legacy Biscuits Focus projects retain their historical medical checks.
+    medical_safety = meta.get("safety_profile", "medical" if "project_type" not in meta else "general") == "medical"
+    max_assistant_chars = int(meta.get("max_assistant_chars", 1500 if "project_type" not in meta else 8000))
 
     for path in files:
         examples, load_findings = validate_mod.load_jsonl(path)
@@ -141,7 +146,13 @@ def validate_all(project: Path = Depends(project_dir)):
             all_findings.append(ValidationFinding(file=f.file, line=f.line, level=f.level, message=f.message))
         for obj, line_no in examples:
             total_examples += 1
-            for f in validate_mod.validate_example(obj, str(path), line_no):
+            for f in validate_mod.validate_example(
+                obj,
+                str(path),
+                line_no,
+                medical_safety=medical_safety,
+                max_assistant_chars=max_assistant_chars,
+            ):
                 all_findings.append(ValidationFinding(file=f.file, line=f.line, level=f.level, message=f.message))
             h = validate_mod.example_key(obj)
             seen_hashes.setdefault(h, []).append(f"{path}:{line_no}")
