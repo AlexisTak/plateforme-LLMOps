@@ -1,0 +1,10 @@
+{
+  "id": "assistant",
+  "base_model": "hermes/hermes:3b",
+  "label": "Assistant",
+  "project_type": "agent",
+  "purpose": "analyser de ticket et proposition de solution",
+  "output_mode": "natural",
+  "ollama_equivalent": null,
+  "added_at": "2026-09-10T00:33:16.493806+00:00"
+}
