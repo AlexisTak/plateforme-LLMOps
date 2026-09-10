@@ -32,6 +32,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [trainingError, setTrainingError] = useState<string | null>(null);
+  const [deploymentOpen, setDeploymentOpen] = useState(false);
   const hadRunningJobs = useRef(false);
 
   const refreshData = useCallback(() => {
@@ -101,10 +102,33 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
   }
 
   const runningJobs = jobs.filter((j) => j.status === "running").length;
+  const deploymentReady = (experiments?.length ?? 0) > 0 || (ragDocuments?.length ?? 0) > 0;
 
   return (
     <div className="space-y-10">
-      <PageHeader title="Dashboard" description="Vue d'ensemble du dataset, du RAG, des expériences et des jobs en cours." />
+      <PageHeader
+        title="Dashboard"
+        description="Vue d'ensemble du dataset, du RAG, des expériences et des jobs en cours."
+        action={
+          <div title={deploymentReady ? "Préparer le projet pour un runtime local" : "Ajoute un RAG ou entraîne un modèle pour activer le déploiement"}>
+            <Button variant="accent" onClick={() => setDeploymentOpen((open) => !open)} disabled={!deploymentReady}>
+              Déployer vers Ollama / vLLM
+            </Button>
+          </div>
+        }
+      />
+
+      {deploymentOpen && (
+        <Card className="flex items-start justify-between gap-4 border-accent/40">
+          <div>
+            <p className="font-display text-text-primary">Déploiement du projet</p>
+            <p className="text-text-secondary text-sm mt-1">
+              Point d’entrée pour ajouter le modèle à Ollama, vLLM ou un autre runtime après entraînement ou indexation du RAG.
+            </p>
+          </div>
+          <Button variant="ghost" onClick={() => setDeploymentOpen(false)}>Fermer</Button>
+        </Card>
+      )}
 
       {error && (
         <Card className="border-error/30 bg-error-soft text-error text-sm">
