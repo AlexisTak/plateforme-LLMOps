@@ -169,9 +169,9 @@ export default function RagPage() {
 
       {grouped.has("research") && (
         <Card className="border-info/30 bg-info-soft text-text-secondary text-sm">
-          Les documents « Études / recherche » sont du contexte informationnel — le modèle ne les utilise jamais pour
-          poser un diagnostic ou recommander un traitement (garde-fou au niveau du system prompt et du dataset
-          safety, pas du contenu récupéré). Voir <code className="font-mono text-text-primary">rag/documents/README.md</code>.
+          Les documents « Études / recherche » servent de contexte à la génération. Vérifie leurs sources et définis
+          dans la mission du projet les limites que le modèle doit respecter : le RAG apporte de l’information, il ne
+          remplace pas les règles du modèle.
         </Card>
       )}
 

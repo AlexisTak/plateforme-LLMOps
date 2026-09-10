@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from api.model_manager import manager
-from inference.router import PLAIN_TEXT_SUFFIX, wants_structured_output
+from inference.router import output_suffix
 from rag.context_builder import RagContext, build_context, build_user_message
 
 USER_CONTEXT_FRAMING = (
@@ -71,12 +72,10 @@ class Assistant:
             prompt_path = self.project_dir / "training" / "configs" / "system_prompt.txt"
             base = prompt_path.read_text(encoding="utf-8").strip() if prompt_path.exists() else "Tu es un assistant utile."
 
-        # See inference/router.py: structured JSON output is disabled
-        # project-wide, wants_structured_output() always returns False now.
-        structured = wants_structured_output(message)
-        if structured is False:
-            return base + PLAIN_TEXT_SUFFIX
-        return base
+        meta_path = self.project_dir / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        # Existing projects predate output_mode and keep their natural-text behavior.
+        return base + output_suffix(meta.get("output_mode", "natural"))
 
     def run(self, message: str, user_context: dict | None = None, rag: bool = False, max_new_tokens: int = 400,
             history: list[dict[str, str]] | None = None) -> AssistantResult:

@@ -98,11 +98,24 @@ export type Project = {
   id: string;
   base_model: string;
   label: string;
+  project_type: "general" | "agent" | "developer" | "business";
+  purpose: string;
+  output_mode: "natural" | "json" | "flexible";
   ollama_equivalent?: string | null;
   added_at: string;
   dataset_examples: number;
   rag_documents: number;
   experiment_count: number;
+};
+
+export type CreateProjectParams = {
+  id: string;
+  label?: string;
+  base_model: string;
+  project_type: Project["project_type"];
+  purpose: string;
+  output_mode: Project["output_mode"];
+  system_prompt?: string;
 };
 
 export type RagCategory = "methods" | "research" | "product" | "other";
@@ -161,8 +174,8 @@ export const api = {
 
   projects: {
     list: () => request<Project[]>("/api/projects"),
-    create: (id: string, base_model: string, label?: string, ollama_equivalent?: string) =>
-      request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ id, base_model, label, ollama_equivalent }) }),
+    create: (params: CreateProjectParams) =>
+      request<Project>("/api/projects", { method: "POST", body: JSON.stringify(params) }),
     remove: (id: string) => request<{ deleted: boolean }>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
 

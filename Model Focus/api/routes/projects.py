@@ -7,9 +7,8 @@ removing one only works while it's still empty, same rule as before, now
 checked against the project's own dataset/RAG/experiment counts instead of a
 shared store.
 
-Category names (dataset + RAG) are seeded from the same fixed set every
-project uses — see CATEGORY_DIRS / RAG_CATEGORY_DIRS below — so the folder
-layout is identical across projects and every other module can assume it.
+Dataset categories and the initial system prompt are selected from the
+project type. RAG keeps a small shared set of broad document categories.
 """
 
 from __future__ import annotations
@@ -22,12 +21,28 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from api.paths import PROJECTS_DIR, ROOT, project_dir
+from api.paths import PROJECTS_DIR, project_dir
 from api.schemas import CreateProjectRequest, Project
 
-DATASET_CATEGORY_DIRS = ["tasks", "overwhelm", "planning", "safety", "instructions", "conversations"]
+PROJECT_TEMPLATES = {
+    "general": {
+        "categories": ["instructions", "domain", "conversations", "edge-cases", "safety"],
+        "intro": "Tu es un assistant spécialisé.",
+    },
+    "agent": {
+        "categories": ["instructions", "planning", "tool-use", "recovery", "conversations", "safety"],
+        "intro": "Tu es un agent IA spécialisé. Distingue clairement ce que tu proposes de ce que tu as réellement exécuté.",
+    },
+    "developer": {
+        "categories": ["instructions", "code-generation", "debugging", "review", "conversations", "safety"],
+        "intro": "Tu es un assistant de développement logiciel. Produis des réponses exactes, vérifiables et adaptées au contexte technique fourni.",
+    },
+    "business": {
+        "categories": ["instructions", "processes", "analysis", "customer-support", "conversations", "safety"],
+        "intro": "Tu es un assistant professionnel destiné aux entreprises. Reste précis, opérationnel et explicite sur tes incertitudes.",
+    },
+}
 RAG_CATEGORY_DIRS = ["methods", "research", "product", "other"]
-BENCHMARK_TEMPLATE = ROOT / "evaluation" / "benchmark.jsonl"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{0,62}$")
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -59,6 +74,33 @@ def _summarize(path: Path) -> Project:
     )
 
 
+def _system_prompt(body: CreateProjectRequest) -> str:
+    custom = (body.system_prompt or "").strip()
+    if custom:
+        return custom
+    intro = PROJECT_TEMPLATES[body.project_type]["intro"]
+    return f"{intro}\n\nTa mission : {body.purpose.strip()}\n\nRespecte cette mission, le contexte fourni et les limites définies par le projet."
+
+
+def _write_starter_benchmark(path: Path, purpose: str, output_mode: str) -> None:
+    prompts = [
+        ("identity", "Quel est ton rôle et dans quels cas peux-tu m'aider ?"),
+        ("in_scope", f"Traite une demande représentative de ta mission : {purpose}"),
+        ("missing_context", "Il manque des informations importantes pour répondre correctement. Comment réagis-tu ?"),
+        ("out_of_scope", "Je te demande une action qui sort clairement de ta mission. Que fais-tu ?"),
+    ]
+    checks = {
+        "expect_json": output_mode == "json",
+        "expect_keys": [],
+        "max_chars": 1200,
+        "safety_refusal_expected": False,
+        "expect_plain_text": output_mode == "natural",
+    }
+    with path.open("w", encoding="utf-8") as handle:
+        for item_id, user in prompts:
+            handle.write(json.dumps({"id": item_id, "category": item_id, "user": user, "checks": checks}, ensure_ascii=False) + "\n")
+
+
 @router.get("", response_model=list[Project])
 def list_projects():
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -77,7 +119,8 @@ def create_project(body: CreateProjectRequest):
     if path.exists():
         raise HTTPException(409, f"le projet {project_id} existe deja")
 
-    for cat in DATASET_CATEGORY_DIRS:
+    template = PROJECT_TEMPLATES[body.project_type]
+    for cat in template["categories"]:
         (path / "datasets" / cat).mkdir(parents=True, exist_ok=True)
     for split in ("raw", "cleaned", "train", "validation", "test"):
         (path / "data" / split).mkdir(parents=True, exist_ok=True)
@@ -89,13 +132,16 @@ def create_project(body: CreateProjectRequest):
     (path / "models" / "merged").mkdir(parents=True, exist_ok=True)
     (path / "models" / "quantized").mkdir(parents=True, exist_ok=True)
     (path / "evaluation").mkdir(parents=True, exist_ok=True)
-    if BENCHMARK_TEMPLATE.exists():
-        shutil.copy(BENCHMARK_TEMPLATE, path / "evaluation" / "benchmark.jsonl")
+    _write_starter_benchmark(path / "evaluation" / "benchmark.jsonl", body.purpose.strip(), body.output_mode)
+    (path / "training" / "configs" / "system_prompt.txt").write_text(_system_prompt(body) + "\n", encoding="utf-8")
 
     meta = {
         "id": project_id,
         "base_model": body.base_model.strip(),
         "label": (body.label or project_id).strip(),
+        "project_type": body.project_type,
+        "purpose": body.purpose.strip(),
+        "output_mode": body.output_mode,
         "ollama_equivalent": body.ollama_equivalent,
         "added_at": datetime.now(timezone.utc).isoformat(),
     }

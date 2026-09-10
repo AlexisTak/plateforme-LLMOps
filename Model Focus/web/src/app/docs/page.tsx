@@ -77,7 +77,7 @@ export default function DocsPage() {
           <Pill>Vue d’ensemble</Pill>
           <h2 className="font-display text-xl text-text-primary">Un atelier pour construire et tester un assistant spécialisé</h2>
           <p className="text-sm text-text-secondary leading-relaxed">
-            Biscuits Focus permet de partir d’un modèle de langage existant, de lui apprendre une manière précise de
+            La console permet de partir d’un modèle de langage existant, de lui apprendre une manière précise de
             répondre, de lui fournir des documents de référence et de comparer les résultats. L’application regroupe
             la préparation des données, l’entraînement, l’évaluation et les tests dans une seule interface locale.
           </p>
@@ -94,8 +94,28 @@ export default function DocsPage() {
             benchmark et les essais dans le chat restent indispensables.
           </p>
           <p className="text-sm text-text-secondary leading-relaxed">
-            Biscuits Focus n’est pas un dispositif médical : il organise et aide à passer à l’action, sans poser de
-            diagnostic ni recommander de traitement.
+            La mission et les limites dépendent du projet : agent IA, assistant de développement, aide aux entreprises
+            ou tout autre domaine textuel. Décris-les clairement à la création et couvre les cas sensibles dans le dataset.
+          </p>
+        </Card>
+      </section>
+
+      <section>
+        <SectionTitle>Créer un modèle pour un nouvel usage</SectionTitle>
+        <Card className="space-y-3 text-sm text-text-secondary leading-relaxed">
+          <p>
+            Le bouton <span className="text-text-primary font-medium">+</span> de la barre de navigation ouvre la création
+            de projet. Choisis un modèle sur mesure, un agent IA, un assistant développeur ou un assistant entreprise,
+            puis écris sa mission avec des exemples concrets de ce qu’il doit accomplir.
+          </p>
+          <p>
+            Le format de réponse peut être du texte naturel, du JSON destiné à une application, ou rester flexible.
+            La console génère ensuite des instructions système, des catégories de dataset et un benchmark de départ
+            adaptés au type choisi. Tu peux aussi fournir tes propres instructions système.
+          </p>
+          <p>
+            Chaque projet est indépendant. Le comportement d’un agent IA ne contaminera donc pas le dataset ou les
+            adapters d’un modèle de développement ou d’un assistant métier.
           </p>
         </Card>
       </section>
