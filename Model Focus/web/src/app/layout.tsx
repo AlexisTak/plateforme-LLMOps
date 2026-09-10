@@ -36,6 +36,7 @@ const NAV = [
   { href: "/training", label: "Training" },
   { href: "/chat", label: "Chat" },
   { href: "/system", label: "System" },
+  { href: "/docs", label: "Docs" },
 ];
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -46,12 +47,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-bg text-text-primary font-sans" suppressHydrationWarning>
         <ProjectProvider>
-          <header className="relative border-b border-border px-6 py-3.5 flex items-center gap-8 sticky top-0 bg-bg/90 backdrop-blur-sm z-10">
+          <header className="relative border-b border-border px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-4 lg:gap-x-8 gap-y-2 sticky top-0 bg-bg/90 backdrop-blur-sm z-10">
             <Link href="/" className="flex items-center gap-2 shrink-0">
               <span className="text-xl leading-none">🍪</span>
               <span className="font-display text-[17px] tracking-tight text-text-primary">Biscuits Focus</span>
             </Link>
-            <nav className="flex gap-1 text-sm">
+            <nav className="order-3 lg:order-none w-full lg:w-auto flex gap-1 text-sm overflow-x-auto">
               {NAV.map((item) => (
                 <NavLink key={item.href} href={item.href} label={item.label} />
               ))}
