@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetStats, EvalSummaryMetric, EvaluationReport, ExperimentResult, JobStatus, RagDocument } from "@/lib/api";
+import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetStats, ExperimentResult, JobStatus, RagDocument } from "@/lib/api";
 import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
 import { BarChart } from "@/components/bar-chart";
 import { useProject } from "@/lib/project-context";
@@ -21,14 +21,11 @@ export default function DashboardPage() {
 
 function ProjectDashboard({ projectId }: { projectId: string }) {
   const [experiments, setExperiments] = useState<ExperimentResult[] | null>(null);
-  const [report, setReport] = useState<string | null>(null);
-  const [reportInfo, setReportInfo] = useState<EvaluationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [datasetStats, setDatasetStats] = useState<DatasetStats | null>(null);
   const [datasetCategories, setDatasetCategories] = useState<DatasetCategorySummary[] | null>(null);
   const [ragDocuments, setRagDocuments] = useState<RagDocument[] | null>(null);
   const [jobs, setJobs] = useState<JobStatus[]>([]);
-  const [evalSummary, setEvalSummary] = useState<Record<string, EvalSummaryMetric> | null>(null);
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
   const [trainingBusy, setTrainingBusy] = useState(false);
   const [trainingError, setTrainingError] = useState<string | null>(null);
@@ -40,15 +37,10 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
       .list(projectId)
       .then((items) => { setExperiments(items); setError(null); })
       .catch((e) => setError(String(e)));
-    api.experiments
-      .report(projectId)
-      .then((r) => { setReport(r.content); setReportInfo(r); })
-      .catch(() => { setReport(null); setReportInfo(null); });
     api.dataset.stats(projectId).then(setDatasetStats).catch(() => {});
     api.dataset.categories(projectId).then(setDatasetCategories).catch(() => {});
     api.rag.documents(projectId).then(setRagDocuments).catch(() => {});
     api.dataset.currentVersion(projectId).then(setCurrentVersion).catch(() => {});
-    api.experiments.reportSummary(projectId).then(setEvalSummary).catch(() => setEvalSummary(null));
   }, [projectId]);
 
   const refreshJobs = useCallback(() => {
@@ -363,79 +355,6 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
         </section>
       )}
 
-      {evalSummary && Object.keys(evalSummary).length > 0 && (
-        <section>
-          <SectionTitle>Qualité par variante (benchmark comportemental)</SectionTitle>
-          <p className="text-text-muted text-xs mb-3">
-            Variantes évaluées sur {Object.values(evalSummary)[0]?.n ?? 0} prompts. Ces contrôles mesurent le format,
-            la concision et les signaux de refus ; la pertinence des actions reste à vérifier dans les réponses.
-          </p>
-          {reportInfo?.stale_reasons.length ? (
-            <p role="status" className="text-error text-sm mb-3">Rapport à actualiser : {reportInfo.stale_reasons.join(" ")}</p>
-          ) : null}
-          <div className="grid sm:grid-cols-3 gap-6">
-            <Card>
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-3">Format texte</p>
-              <BarChart
-                data={Object.entries(evalSummary)
-                  .filter(([, m]) => m.plain_text_pct != null)
-                  .map(([label, m]) => ({ label, value: m.plain_text_pct as number }))}
-                formatValue={(v) => v.toFixed(0)}
-                unit="%"
-              />
-            </Card>
-            <Card>
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-3">Concision</p>
-              <BarChart
-                data={Object.entries(evalSummary)
-                  .filter(([, m]) => m.concise_pct != null)
-                  .map(([label, m]) => ({ label, value: m.concise_pct as number }))}
-                formatValue={(v) => v.toFixed(0)}
-                unit="%"
-              />
-            </Card>
-            <Card>
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-3">Safety pass</p>
-              <BarChart
-                data={Object.entries(evalSummary)
-                  .filter(([, m]) => m.safety_pass_pct != null)
-                  .map(([label, m]) => ({ label, value: m.safety_pass_pct as number }))}
-                formatValue={(v) => v.toFixed(0)}
-                unit="%"
-              />
-            </Card>
-          </div>
-        </section>
-      )}
-
-      <section>
-        <SectionTitle>Dernier rapport d&apos;évaluation</SectionTitle>
-        {reportInfo?.metadata.generated_at && (
-          <p className="text-text-muted text-xs mb-3">
-            {new Date(reportInfo.metadata.generated_at).toLocaleString("fr-FR")} · Dataset {reportInfo.metadata.dataset_version ?? "inconnu"}
-          </p>
-        )}
-        {reportInfo?.comparison?.comparable && (
-          <div className="text-sm text-text-secondary mb-3 space-y-1">
-            <p>Écart avec le rapport précédent, en points de pourcentage :</p>
-            {Object.entries(reportInfo.comparison.deltas).map(([label, metrics]) => (
-              <p key={label}>{label} : {Object.entries(metrics).filter(([key]) =>
-                ["plain_text_pct", "concise_pct", "safety_pass_pct"].includes(key)).map(([key, value]) =>
-                `${({ plain_text_pct: "format texte", concise_pct: "concision", safety_pass_pct: "refus" } as Record<string, string>)[key]} ${value > 0 ? "+" : ""}${value}`
-              ).join(" ; ")}</p>
-            ))}
-          </div>
-        )}
-        {report ? (
-          <Card className="p-0">
-            <pre className="whitespace-pre-wrap text-xs font-mono text-text-secondary p-4 max-h-[500px] overflow-y-auto leading-relaxed">
-              {report}
-            </pre>
-          </Card>
-        ) : (
-          <EmptyState>Aucun rapport pour l&apos;instant. Lance une évaluation depuis l&apos;onglet Training.</EmptyState>
-        )}
-      </section>
     </div>
   );
 }

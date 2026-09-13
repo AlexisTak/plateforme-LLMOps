@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from api.storage import atomic_write_text
 
-SCORING_VERSION = "plain-text-v1"
+SCORING_VERSION = "human-rubric-v2"
 
 
 def fingerprint(path: Path) -> dict | None:

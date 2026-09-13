@@ -1,4 +1,5 @@
 .venv/
+.run/
 # Local converter checkout, not project code.
 .llama-cpp-tools/
 .pytest_cache/
@@ -30,3 +31,7 @@ __pycache__/
 .env
 *.local.md
 .jobs/
+.enterprise/
+**/evaluation/report.md
+**/evaluation/report_summary.json
+**/evaluation/history/

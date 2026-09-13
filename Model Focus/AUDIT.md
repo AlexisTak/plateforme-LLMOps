@@ -26,9 +26,9 @@ evaluation/benchmark 14 prompts
 calcule sur **9 exemples**. Un écart de 0.1 correspond à un seul exemple qui bouge.
 Le sweep compare du bruit, pas des configurations.
 
-Même problème côté évaluation : dans `report_summary.json`, `experiment_001` affiche
-`safety_pass_pct: 66.7` contre `100.0` pour les autres. Sur 14 prompts dont ~3 de
-sécurité, c'est **un seul exemple** de différence. Aucune conclusion ne tient.
+Même problème côté évaluation : avec une poignée de prompts par catégorie, une
+seule réponse peut déplacer fortement un pourcentage. Aucune conclusion robuste
+ne tient sans davantage de cas indépendants.
 
 **Ordre de grandeur cible** : 800–1500 exemples d'entraînement pour un SLM
 spécialisé, avec une validation d'au moins 80–100 exemples pour que la métrique
@@ -168,8 +168,7 @@ notamment, tous purement CPU et rapides :
 - `scripts/prepare_dataset.py` — le split stratifié, et surtout **l'absence de fuite**
   entre `train` et `test`
 - `rag/chunker.py` — découpage et chevauchement
-- `evaluation/run.py::has_unnegated_medical_claim` — le détecteur de négation
-  française, qui est de la logique métier sensible côté sécurité
+- `evaluation/run.py::score` — les contrats de format et de concision
 
 ---
 

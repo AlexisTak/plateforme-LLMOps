@@ -6,7 +6,7 @@
 {"query": "qu'est-ce que le brain dump ?", "expected_doc": "decharge_mentale"}
 {"query": "comment réserver des créneaux dans mon agenda pour mes tâches ?", "expected_doc": "time_blocking"}
 {"query": "c'est quoi le time blocking ?", "expected_doc": "time_blocking"}
-{"query": "est-ce que Biscuits Focus pose un diagnostic de TDAH ?", "expected_doc": "biscuits_focus_produit"}
+{"query": "comment Biscuits Focus sépare le RAG du fine-tuning ?", "expected_doc": "biscuits_focus_produit"}
 {"query": "sur quel modèle de langage est basé Biscuits Focus ?", "expected_doc": "biscuits_focus_produit"}
 {"query": "comment prioriser entre ce qui est urgent et ce qui est important ?", "expected_doc": "loi_pareto_eisenhower"}
 {"query": "c'est quoi la règle des 80/20 ?", "expected_doc": "loi_pareto_eisenhower"}

@@ -1,7 +1,7 @@
 [project]
 name = "biscuits-focus"
 version = "0.1.0"
-description = "Specialized SLM (Llama 3.2 1B + LoRA) for ADHD-friendly task breakdown, prioritization and cognitive-load reduction. Not a medical device."
+description = "Local platform for creating, fine-tuning and evaluating specialized language models."
 requires-python = ">=3.11,<3.12"
 readme = "README.md"
 

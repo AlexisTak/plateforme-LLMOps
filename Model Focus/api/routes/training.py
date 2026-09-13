@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.jobs import registry
 from api.paths import project_dir
-from api.schemas import CreateConfigRequest, JobStatus, StartPipelineRequest, StartSweepRequest, StartTrainingRequest, TrainingConfigSummary
+from api.model_preflight import check_model, require_ready
+from api.schemas import CreateConfigRequest, JobStatus, ModelPreflight, StartPipelineRequest, StartSweepRequest, StartTrainingRequest, TrainingConfigSummary
+from api.routes.enterprise import enforce_job_quota
 
 # Real module names from LlamaForCausalLM (see docs/ENVIRONMENT.md) — attention +
 # MLP projections, not guessed. Kept identical across every generated config so
@@ -19,6 +21,18 @@ from api.schemas import CreateConfigRequest, JobStatus, StartPipelineRequest, St
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 router = APIRouter(prefix="/api/projects/{project_id}/training", tags=["training"])
+
+
+@router.get("/preflight", response_model=ModelPreflight)
+def model_preflight(model: str, project: Path = Depends(project_dir)):
+    return check_model(model)
+
+
+def _config_model(project: Path, filename: str) -> str:
+    path = project / "training" / "configs" / filename
+    if not path.exists():
+        raise FileNotFoundError(f"config not found: {path}")
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["model"]["name"]
 
 
 @router.get("/configs", response_model=list[TrainingConfigSummary])
@@ -124,9 +138,13 @@ def create_config(body: CreateConfigRequest, project: Path = Depends(project_dir
 @router.post("/start", response_model=JobStatus)
 def start_training(body: StartTrainingRequest, project: Path = Depends(project_dir)):
     try:
+        enforce_job_quota(project)
+        require_ready(_config_model(project, body.config_filename))
         job = registry.start_training(project, body.config_filename, resume=body.resume)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, f"Prévalidation échouée : {e}")
     return JobStatus(
         job_id=job.job_id,
         kind="training",
@@ -142,9 +160,13 @@ def start_pipeline(body: StartPipelineRequest, project: Path = Depends(project_d
     """Autonomous run: validate dataset -> rebuild splits -> train, one job.
     Only touches this project's datasets/ / data/ / training/ — never rag/documents/."""
     try:
+        enforce_job_quota(project)
+        require_ready(_config_model(project, body.config_filename))
         job = registry.start_pipeline(project, body.config_filename, body.dataset_version, resume=body.resume)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, f"Prévalidation échouée : {e}")
     return JobStatus(
         job_id=job.job_id,
         kind="pipeline",
@@ -159,5 +181,11 @@ def start_pipeline(body: StartPipelineRequest, project: Path = Depends(project_d
 def start_sweep(body: StartSweepRequest, project: Path = Depends(project_dir)):
     """Trains r=8, r=16 and r=32 sequentially, one job — full comparison in one
     click. Requires the project to already have lora_r8/16/32.yaml configs."""
+    enforce_job_quota(project)
+    meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
+    try:
+        require_ready(meta["base_model"])
+    except ValueError as e:
+        raise HTTPException(400, f"Prévalidation échouée : {e}")
     job = registry.start_sweep(project, body.dataset_version, resume=body.resume)
     return JobStatus(job_id=job.job_id, kind="sweep", status=job.status, started_at=job.started_at, log_tail=[])

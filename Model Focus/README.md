@@ -4,9 +4,7 @@ Les changements récents du chat, de l'évaluation et des jobs sont décrits dan
 [docs/RUNTIME_FIXES.md](docs/RUNTIME_FIXES.md). Les rapports historiques JSON
 doivent être régénérés avec les critères actuels en texte naturel.
 
-Small specialized model (base: `llama3.2:1b`) fine-tuned for task breakdown, prioritization, overwhelm reduction and "next action" generation — aimed at people with attention/organization difficulties.
-
-**Not a medical device.** Does not diagnose, treat, or claim to manage ADHD. See [MODEL_CARD.md](MODEL_CARD.md) (created once the first model ships) for authorized/prohibited uses.
+Local platform for creating, fine-tuning, evaluating and running specialized language models with isolated projects, LoRA adapters, RAG and behavioral benchmarks.
 
 ## Three separate systems — do not conflate
 
@@ -18,9 +16,26 @@ Small specialized model (base: `llama3.2:1b`) fine-tuned for task breakdown, pri
 
 ## Environment
 
-See [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) for the full hardware/software audit. Summary: RTX 4060 8GB VRAM, 16GB RAM, Windows 11, Python 3.11 venv, CUDA via torch wheels (no system CUDA toolkit needed).
+See [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) for the original hardware/software audit. The project supports Windows 11 and Linux (tested launch path on Ubuntu), with a Python 3.11 venv and optional CUDA via PyTorch wheels.
 
 ## Setup
+
+### Linux
+
+Prérequis : Python 3.11 avec le module `venv`, Node.js 20+ / npm et, pour
+l'inférence locale, [Ollama](https://ollama.com). Sur Ubuntu, installez au minimum
+`python3.11`, `python3.11-venv` et `nodejs`/`npm`, puis :
+
+```bash
+chmod +x setup-linux.sh start.sh stop.sh
+./setup-linux.sh        # GPU NVIDIA / CUDA 12.4
+# ./setup-linux.sh --cpu  # variante sans GPU NVIDIA
+```
+
+`PYTHON_BIN=/chemin/vers/python ./setup-linux.sh` permet de choisir explicitement
+un autre interpréteur compatible. Python 3.11 reste recommandé pour la pile ML.
+
+### Windows
 
 ```bash
 py -3.11 -m venv .venv
@@ -78,9 +93,41 @@ Pipeline : `rag/documents/` (6 docs — méthodes d'organisation + doc produit) 
 - Reconstruire l'index : `python -m rag.index`.
 - Interface programmatique : `inference/assistant.py` (`Assistant(adapter=...).run(message, rag=True, user_context={...})`), combine LoRA + RAG + user_context sans jamais entraîner ce dernier dans les poids.
 
+## Benchmark comportemental
+
+Chaque entrée de `projects/<id>/evaluation/benchmark.jsonl` contient un prompt,
+les contrôles automatiques (`checks`) et un barème concret de revue humaine
+(`review`). Le rapport affiche le prompt, la réponse et ces critères côte à côte.
+Les nouveaux projets reçoivent huit scénarios couvrant mission, ambiguïté,
+contraintes contradictoires, priorisation, reprise après échec, limites et fausse
+déclaration d'exécution. Lancez-les depuis la page Dashboard ou avec :
+
+```bash
+python evaluation/run.py --project-dir projects/<id>
+```
+
+## Modèle d'inférence local
+
+Le modèle Hugging Face local utilisé par un projet peut être changé depuis le
+bouton **LLM** à côté du sélecteur de projet. Cette configuration reste locale
+et n'utilise aucun fournisseur d'API externe.
+
 ## Console web (dataset / training / évaluation / chat)
 
-Tout lancer d'un coup :
+Tout lancer d'un coup sous Linux :
+
+```bash
+./start.sh                  # services en arrière-plan + navigateur
+./start.sh --no-browser     # sans ouvrir le navigateur
+./stop.sh                   # arrête API + web
+./stop.sh --include-ollama  # arrête aussi Ollama, s'il a été lancé ici
+```
+
+Les sorties sont conservées dans `.run/api.log`, `.run/web.log` et
+`.run/ollama.log`. Les fichiers PID garantissent que `stop.sh` n'arrête que les
+services lancés par ce projet.
+
+Sous Windows :
 
 ```powershell
 .\start.ps1              # API + web + Ollama (si installé), ouvre le navigateur
@@ -95,7 +142,8 @@ Ou manuellement :
 
 ```bash
 # terminal 1 — backend
-.venv\Scripts\Activate.ps1
+source .venv/bin/activate  # Linux
+# .venv\Scripts\Activate.ps1  # Windows PowerShell
 uvicorn api.main:app --reload --port 8000
 
 # terminal 2 — frontend
@@ -110,6 +158,44 @@ La page System existe précisément parce que ce genre de régression peut arriv
 Upload RAG : PDF (texte extrait via `pypdf`, pas d'OCR — un PDF scanné sans couche texte échoue explicitement), TXT, MD. 25 MB max par fichier. **L'index se reconstruit automatiquement** après chaque ajout/suppression de document (job en sous-processus, debounce si plusieurs changements arrivent pendant qu'un reindex tourne déjà — évite deux `rag.index` concurrents qui se marcheraient dessus sur la même collection Chroma). Bouton "Forcer une reconstruction" gardé pour un déclenchement manuel si besoin.
 
 Important : ce pipeline auto-reindex touche uniquement `rag/documents/` (retrieval). Il n'entraîne jamais le modèle sur ces documents — le fine-tuning (`datasets/` → `training/`) reste un pipeline totalement séparé, déclenché manuellement depuis la page Training. Voir la section "Trois systèmes séparés" plus haut. Les jobs terminés sont conservés dans `.jobs/` après redémarrage. Un entraînement lancé depuis l'API est désormais suivi d'une évaluation automatique s'il réussit. Voir [les détails et limites](docs/RUNTIME_FIXES.md).
+
+## Socle entreprise
+
+La page **Entreprise** centralise le registre versionné des modèles, le circuit
+d'approbation, les quotas, les métriques et un journal d'audit chaîné par hash.
+Par défaut, l'application reste utilisable hors ligne avec un administrateur
+local et une base SQLite dans `.enterprise/`.
+
+Pour la placer derrière un fournisseur SSO (Entra ID, Okta, Auth0, Google
+Workspace…), faites valider l'identité par votre passerelle puis transmettez les
+en-têtes à l'API :
+
+```bash
+export BISCUITS_AUTH_MODE=proxy
+export BISCUITS_PROXY_SECRET='un-secret-long-et-aleatoire'
+```
+
+La passerelle doit envoyer `X-Biscuits-Proxy-Secret`, `X-Biscuits-User-Id`,
+`X-Biscuits-User-Email`, `X-Biscuits-User-Name` et `X-Biscuits-Role`. Les rôles
+sont `viewer`, `operator`, `reviewer` et `admin`. Les écritures métier demandent
+au moins `operator`; les approbations `reviewer`; les quotas `admin`.
+En mode proxy, chaque personne doit aussi être membre du projet. Le créateur
+d'un projet devient automatiquement administrateur de celui-ci. La page
+Entreprise permet ensuite d'ajouter les membres et de modifier leur rôle.
+
+`BISCUITS_ENTERPRISE_DB` permet de déplacer la base du plan de contrôle.
+`/api/enterprise/metrics` expose les métriques applicatives et
+`/api/enterprise/metrics/prometheus` les expose au format Prometheus. Le
+`/api/enterprise/projects/{id}/deployment` produit le manifeste reproductible de
+la version en production. Aucune politique de contenu n'est imposée par ce socle.
+Le bouton **Télécharger la sauvegarde** produit un ZIP avec un manifeste SHA-256;
+les poids de modèles et index régénérables en sont exclus afin de garder l'archive
+transportable.
+
+En mode SSO, une version doit être approuvée par une autre personne que son
+créateur. Le benchmark est revérifié à chaque transition : toute modification
+du dataset, du prompt, du modèle ou des adapters impose de le relancer. Une
+version archivée déjà approuvée peut être restaurée en production par rollback.
 
 ## Status
 

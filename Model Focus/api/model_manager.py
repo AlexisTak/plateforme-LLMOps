@@ -24,7 +24,7 @@ def _default_base_model(project_dir: Path) -> str:
     """Base model used for chat/eval when no adapter is selected — the
     project's own meta.json base_model."""
     meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
-    return meta["base_model"]
+    return meta.get("inference_model") or meta["base_model"]
 
 
 def resolve_base_model(project_dir: Path, adapter: str | None) -> str:

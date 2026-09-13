@@ -11,11 +11,11 @@
 
 A small (1B parameter), locally-runnable assistant fine-tuned to help break down tasks, propose a single concrete next action, prioritize between competing tasks, and reduce cognitive load when a user reports feeling overwhelmed. It's aimed at people with attention/organization difficulties, but works as a general task-organization assistant.
 
-## What this model is NOT
+## Architecture boundary
 
-- **Not a medical device.** It does not diagnose, treat, or claim to manage ADHD or any other condition.
-- **Not a source of medical advice.** It's trained to refuse diagnosis/treatment/medication questions and redirect to a professional — see `datasets/safety/` and [evaluation/report.md](evaluation/report.md) for how it performs on this.
-- **Not a knowledge base.** Facts, methods, and product documentation come from RAG ([rag/](rag)), not from the fine-tuned weights — see [README.md](README.md) for the fine-tuning/RAG/memory separation.
+Facts, methods, and product documentation come from RAG ([rag/](rag)), not from
+the fine-tuned weights. See [README.md](README.md) for the separation between
+fine-tuning, RAG and application context.
 
 ## Intended use
 
@@ -23,28 +23,18 @@ A small (1B parameter), locally-runnable assistant fine-tuned to help break down
 - Structured JSON output for integration into task-management apps (schema: [docs/OUTPUT_SCHEMA.json](docs/OUTPUT_SCHEMA.json)).
 - Optionally grounded with RAG documents (organizational methods, product docs, and — if the user adds them — research papers, treated as informational context only, never as instructions; see [rag/documents/README.md](rag/documents/README.md)).
 
-## Prohibited use
-
-- Diagnosing ADHD or any medical/psychological condition.
-- Prescribing, recommending, or discussing medication dosage.
-- Presenting model output as professional medical, psychiatric, or therapeutic advice.
-- Any safety-critical decision-making without human review.
-
 ## Evaluation summary
 
 See [evaluation/report.md](evaluation/report.md) (behavior benchmark, base vs LoRA r=8/16/32) and [evaluation/quantization_report.md](evaluation/quantization_report.md) (Q4/Q8/F16 comparison). Headline numbers, LoRA r=32 vs base model on a 14-prompt benchmark:
 
-| | JSON valid | Concise | Safety pass |
-|---|---|---|---|
-| Base (no fine-tune) | 0% | 35.7% | 100%* |
-| Biscuits Focus (r=32) | 100% | 85.7% | 100% |
-
-\* Base model's safety pass rate largely reflects Llama's own RLHF alignment, not this project's fine-tuning — see limits below.
+| | JSON valid | Concise |
+|---|---|---|
+| Base (no fine-tune) | 0% | 35.7% |
+| Biscuits Focus (r=32) | 100% | 85.7% |
 
 ## Known limitations
 
 - **Dataset is still small** (117 examples). Behavior generalizes to prompts resembling training examples better than to genuinely novel phrasing; expect rough edges on out-of-distribution requests.
-- **Safety is not perfect.** During evaluation, the r=16 variant produced one non-refusal on a medication-related prompt ("arrêter mon traitement psychiatrique") — see [evaluation/report.md](evaluation/report.md). More `datasets/safety/` coverage on treatment-continuation questions specifically is a known gap.
 - **Hallucination is not yet benchmarked** against RAG-retrieved context — see [evaluation/report.md](evaluation/report.md) limitations section.
 - **assistant_only_loss disabled** — training loss is computed over full sequences (user + assistant tokens), not just assistant turns, because the base Llama 3 chat template lacks the `{% generation %}` markers TRL needs for turn-level masking. Low-impact today (short, mostly single-turn examples) but worth revisiting with a custom chat template if multi-turn behavior becomes a priority.
 - **Q5_K_M unavailable** in this Ollama version's built-in quantizer — the Q4/Q5/Q8 comparison originally planned became Q4/Q8/F16.

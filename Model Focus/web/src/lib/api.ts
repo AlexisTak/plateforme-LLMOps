@@ -53,11 +53,31 @@ export type CurrentDatasetVersion = { version: string | null; train: number; val
 
 export type EvalSummaryMetric = {
   n: number;
+  plain_text_passed?: number;
+  plain_text_total?: number;
   plain_text_pct?: number | null;
+  json_valid_passed?: number;
+  json_valid_total?: number;
   json_valid_pct: number | null;
+  has_expected_keys_passed?: number;
+  has_expected_keys_total?: number;
   has_expected_keys_pct: number | null;
+  concise_passed?: number;
+  concise_total?: number;
   concise_pct: number | null;
-  safety_pass_pct: number | null;
+};
+
+export type BenchmarkCase = {
+  id: string;
+  category: string;
+  user: string;
+  checks: {
+    expect_json: boolean;
+    expect_keys: string[];
+    max_chars: number;
+    expect_plain_text: boolean;
+  };
+  review: string[];
 };
 
 export type EvaluationReport = {
@@ -66,6 +86,16 @@ export type EvaluationReport = {
   metadata: { generated_at?: string; dataset_version?: string | null };
   stale_reasons: string[];
   comparison?: { comparable: boolean; previous_generated_at?: string; deltas: Record<string, Record<string, number>> } | null;
+  outputs?: Record<string, EvaluationOutput[]>;
+};
+
+export type EvaluationOutput = {
+  id: string;
+  category: string;
+  prompt?: string;
+  response: string;
+  plain_text?: boolean | null;
+  concise: boolean;
 };
 
 export type ExperimentResult = {
@@ -102,10 +132,20 @@ export type Project = {
   purpose: string;
   output_mode: "natural" | "json" | "flexible";
   ollama_equivalent?: string | null;
+  inference_model?: string | null;
   added_at: string;
   dataset_examples: number;
   rag_documents: number;
   experiment_count: number;
+};
+
+export type InferenceConfig = {
+  model: string;
+};
+export type ProjectSettings = {
+  id: string; label: string; project_type: Project["project_type"]; purpose: string;
+  output_mode: Project["output_mode"]; base_model: string; inference_model: string;
+  system_prompt: string; max_assistant_chars: number;
 };
 
 export type CreateProjectParams = {
@@ -132,6 +172,21 @@ export type RagDocument = {
 
 export type TrainingMetricPoint = { step: number; epoch?: number | null; loss?: number | null; eval_loss?: number | null; learning_rate?: number | null };
 
+export type ModelPreflight = {
+  model: string;
+  ready: boolean;
+  accessible: boolean;
+  architecture?: string | null;
+  parameter_count?: number | null;
+  estimated_download_gb?: number | null;
+  estimated_vram_gb?: number | null;
+  available_vram_gb?: number | null;
+  cuda_available: boolean;
+  warnings: string[];
+  errors: string[];
+  technical_detail?: string | null;
+};
+
 export type CreateConfigParams = {
   name: string;
   notes?: string;
@@ -156,6 +211,9 @@ export type JobStatus = {
   return_code?: number | null;
   log_tail: string[];
   result?: Record<string, unknown> | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  suggestion?: string | null;
 };
 
 export type PackageCheck = { package: string; installed: string | null; expected: string | null; ok: boolean };
@@ -168,6 +226,33 @@ export type SystemHealth = {
   ollama: { running: boolean; models: string[] };
 };
 
+export type EnterpriseContext = {
+  actor: { id: string; email: string; role: "viewer" | "operator" | "reviewer" | "admin"; name: string };
+  auth_mode: "local" | "proxy";
+  audit_chain_valid: boolean;
+};
+export type EnterpriseMetrics = {
+  requests_total?: number; status_2xx?: number; status_4xx?: number; status_5xx?: number;
+  uptime_seconds: number; latency_avg_ms: number; latency_p95_ms: number;
+  jobs_running: number; jobs_failed: number; jobs_total: number;
+};
+export type ModelVersion = {
+  id: string; project_id: string; version: string; status: "draft" | "evaluated" | "approved" | "production" | "archived";
+  model: string; dataset_version?: string | null; benchmark_generated_at?: string | null;
+  created_at: string; created_by: string; approved_at?: string | null; approved_by?: string | null; notes: string;
+};
+export type AuditEvent = {
+  id: string; created_at: string; actor_id: string; action: string; resource_type: string;
+  resource_id?: string | null; project_id?: string | null; details: Record<string, unknown>; event_hash: string;
+};
+export type ProjectQuota = {
+  project_id: string; max_concurrent_jobs: number; max_daily_jobs: number; max_storage_gb: number; running_jobs?: number; storage_used_gb?: number;
+};
+export type ProjectMember = {
+  project_id: string; actor_id: string; email: string; name: string;
+  role: "viewer" | "operator" | "reviewer" | "admin"; created_at: string;
+};
+
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
   systemHealth: () => request<SystemHealth>("/api/system/health"),
@@ -177,6 +262,15 @@ export const api = {
     create: (params: CreateProjectParams) =>
       request<Project>("/api/projects", { method: "POST", body: JSON.stringify(params) }),
     remove: (id: string) => request<{ deleted: boolean }>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    inference: (id: string) => request<InferenceConfig>(`/api/projects/${encodeURIComponent(id)}/inference`),
+    updateInference: (id: string, model: string) =>
+      request<InferenceConfig>(`/api/projects/${encodeURIComponent(id)}/inference`, {
+        method: "PATCH",
+        body: JSON.stringify({ model }),
+      }),
+    settings: (id: string) => request<ProjectSettings>(`/api/projects/${encodeURIComponent(id)}/settings`),
+    updateSettings: (id: string, settings: Omit<ProjectSettings, "id" | "base_model">) =>
+      request<ProjectSettings>(`/api/projects/${encodeURIComponent(id)}/settings`, { method: "PUT", body: JSON.stringify(settings) }),
   },
 
   dataset: {
@@ -207,6 +301,8 @@ export const api = {
   },
 
   training: {
+    preflight: (project: string, model: string) =>
+      request<ModelPreflight>(`${p(project)}/training/preflight?model=${encodeURIComponent(model)}`),
     configs: (project: string) => request<TrainingConfigSummary[]>(`${p(project)}/training/configs`),
     start: (project: string, config_filename: string, resume = false) =>
       request<JobStatus>(`${p(project)}/training/start`, { method: "POST", body: JSON.stringify({ config_filename, resume }) }),
@@ -222,6 +318,10 @@ export const api = {
   },
 
   evaluation: {
+    benchmark: (project: string) => request<BenchmarkCase[]>(`${p(project)}/evaluation/benchmark`),
+    createCase: (project: string, item: BenchmarkCase) => request<BenchmarkCase>(`${p(project)}/evaluation/benchmark`, { method: "POST", body: JSON.stringify(item) }),
+    updateCase: (project: string, caseId: string, item: BenchmarkCase) => request<BenchmarkCase>(`${p(project)}/evaluation/benchmark/${encodeURIComponent(caseId)}`, { method: "PUT", body: JSON.stringify(item) }),
+    removeCase: (project: string, caseId: string) => request<{ deleted: boolean }>(`${p(project)}/evaluation/benchmark/${encodeURIComponent(caseId)}`, { method: "DELETE" }),
     run: (project: string) => request<JobStatus>(`${p(project)}/evaluation/run`, { method: "POST" }),
   },
 
@@ -265,5 +365,21 @@ export const api = {
         { method: "DELETE" }
       ),
     reindex: (project: string) => request<JobStatus>(`${p(project)}/rag/reindex`, { method: "POST" }),
+  },
+
+  enterprise: {
+    context: () => request<EnterpriseContext>("/api/enterprise/context"),
+    metrics: () => request<EnterpriseMetrics>("/api/enterprise/metrics"),
+    audit: (project?: string) => request<AuditEvent[]>(`/api/enterprise/audit${project ? `?project_id=${encodeURIComponent(project)}` : ""}`),
+    registry: (project: string) => request<ModelVersion[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/registry`),
+    createVersion: (project: string, version: string, notes: string) => request<ModelVersion>(`/api/enterprise/projects/${encodeURIComponent(project)}/registry`, { method: "POST", body: JSON.stringify({ version, notes }) }),
+    transition: (project: string, id: string, status: ModelVersion["status"]) => request<ModelVersion>(`/api/enterprise/projects/${encodeURIComponent(project)}/registry/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ status }) }),
+    quota: (project: string) => request<ProjectQuota>(`/api/enterprise/projects/${encodeURIComponent(project)}/quota`),
+    updateQuota: (project: string, quota: Omit<ProjectQuota, "project_id" | "running_jobs">) => request<ProjectQuota>(`/api/enterprise/projects/${encodeURIComponent(project)}/quota`, { method: "PUT", body: JSON.stringify(quota) }),
+    deployment: (project: string) => request<Record<string, unknown>>(`/api/enterprise/projects/${encodeURIComponent(project)}/deployment`),
+    members: (project: string) => request<ProjectMember[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`),
+    updateMember: (project: string, member: Pick<ProjectMember, "actor_id" | "email" | "name" | "role">) => request<ProjectMember>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`, { method: "PUT", body: JSON.stringify(member) }),
+    removeMember: (project: string, actorId: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(actorId)}`, { method: "DELETE" }),
+    backupUrl: (project: string) => `${API_URL}/api/enterprise/projects/${encodeURIComponent(project)}/backup`,
   },
 };

@@ -21,6 +21,36 @@ from api.schemas import JobStatus, TrainingMetricPoint
 router = APIRouter(tags=["jobs"])
 
 
+def _friendly_error(job) -> tuple[str | None, str | None, str | None]:
+    if job.status != "failed":
+        return None, None, None
+    text = "\n".join(job.stdout_lines[-200:]).lower()
+    rules = [
+        (("repo id must use", "repository not found", "is not a valid model identifier"), "model_invalid",
+         "Le modèle configuré est introuvable ou son identifiant est invalide.",
+         "Choisis un identifiant Hugging Face au format organisation/modèle et lance la prévalidation."),
+        (("cuda out of memory", "outofmemoryerror"), "cuda_oom",
+         "La mémoire du GPU est insuffisante pour ce job.",
+         "Réduis la taille du modèle, la longueur de séquence ou le batch size."),
+        (("no module named", "modulenotfounderror"), "missing_dependency",
+         "Une dépendance Python nécessaire n'est pas installée.",
+         "Réinstalle l'environnement avec ./setup-linux.sh puis redémarre l'API."),
+        (("validation failed", "invalid json", "no examples"), "dataset_invalid",
+         "Le dataset n'a pas passé la validation.",
+         "Ouvre Dataset, corrige les erreurs signalées puis reconstruis les splits."),
+        (("already exists", "adapter existant"), "artifact_exists",
+         "Un résultat existe déjà pour cette configuration.",
+         "Active Reprendre/écraser ou choisis un autre nom de configuration."),
+        (("connectionerror", "timed out", "temporary failure"), "network_error",
+         "Le téléchargement ou l'accès réseau a échoué.",
+         "Vérifie la connexion puis relance ; les fichiers déjà téléchargés restent en cache."),
+    ]
+    for needles, code, message, suggestion in rules:
+        if any(needle in text for needle in needles):
+            return code, message, suggestion
+    return "job_failed", "Le job s'est arrêté avec une erreur non reconnue.", "Consulte les dernières lignes techniques ci-dessous."
+
+
 def _to_status(job) -> JobStatus:
     result = None
     if job.kind in ("training", "pipeline") and job.status == "completed" and job.config_filename:
@@ -31,6 +61,7 @@ def _to_status(job) -> JobStatus:
             if result_path.exists():
                 result = json.loads(result_path.read_text(encoding="utf-8"))
 
+    error_code, error_message, suggestion = _friendly_error(job)
     return JobStatus(
         job_id=job.job_id,
         kind=job.kind,
@@ -41,6 +72,9 @@ def _to_status(job) -> JobStatus:
         return_code=job.return_code,
         log_tail=job.stdout_lines[-200:],
         result=result,
+        error_code=error_code,
+        error_message=error_message,
+        suggestion=suggestion,
     )
 
 

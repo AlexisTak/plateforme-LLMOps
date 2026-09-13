@@ -2,10 +2,11 @@
 
 import { ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api, JobStatus, Project, TrainingConfigSummary, TrainingMetricPoint } from "@/lib/api";
+import { api, JobStatus, ModelPreflight, Project, TrainingConfigSummary, TrainingMetricPoint } from "@/lib/api";
 import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
 import { LineChart } from "@/components/line-chart";
 import { useProject } from "@/lib/project-context";
+import { ModelPreflightCard } from "@/components/model-preflight-card";
 
 export default function TrainingPage() {
   const { projectId, project } = useProject();
@@ -38,6 +39,17 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
   const [newConfigGradAccum, setNewConfigGradAccum] = useState(8);
   const [newConfigWarmup, setNewConfigWarmup] = useState(5);
   const [newConfigError, setNewConfigError] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<ModelPreflight | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(true);
+
+  const checkModel = () => {
+    if (!project?.base_model) return;
+    setPreflightLoading(true);
+    api.training.preflight(projectId, project.base_model)
+      .then(setPreflight)
+      .catch(() => setPreflight(null))
+      .finally(() => setPreflightLoading(false));
+  };
 
   const refresh = () => {
     if (!projectId) return;
@@ -62,16 +74,17 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
     };
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!project?.base_model) return;
+    api.training.preflight(projectId, project.base_model)
+      .then(setPreflight)
+      .catch(() => setPreflight(null))
+      .finally(() => setPreflightLoading(false));
+  }, [projectId, project?.base_model]);
+
   const startTraining = async (filename: string) => {
     if (!projectId) return;
     const job = await api.training.start(projectId, filename);
-    setSelectedJob(job.job_id);
-    refresh();
-  };
-
-  const runEvaluation = async () => {
-    if (!projectId) return;
-    const job = await api.evaluation.run(projectId);
     setSelectedJob(job.job_id);
     refresh();
   };
@@ -140,12 +153,8 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
       <PageHeader
         title="Training"
         description="Chaque entraînement réussi est suivi d'une évaluation automatique. Les jobs terminés sont conservés après redémarrage."
-        action={
-          <Button variant="accent" onClick={runEvaluation}>
-            Lancer une évaluation
-          </Button>
-        }
       />
+      <ModelPreflightCard result={preflight} loading={preflightLoading} onRetry={checkModel} />
 
       <section>
         <SectionTitle>Pipeline automatique</SectionTitle>
@@ -172,7 +181,7 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
               <input type="checkbox" checked={pipelineResume} onChange={(e) => setPipelineResume(e.target.checked)} className="accent-[var(--accent)]" />
               Reprendre/écraser
             </label>
-            <Button variant="accent" onClick={runPipeline} disabled={!pipelineConfig || !pipelineVersion.trim()}>
+            <Button variant="accent" onClick={runPipeline} disabled={!preflight?.ready || !pipelineConfig || !pipelineVersion.trim()}>
               Lancer le pipeline complet
             </Button>
           </div>
@@ -198,7 +207,7 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
               <input type="checkbox" checked={sweepResume} onChange={(e) => setSweepResume(e.target.checked)} className="accent-[var(--accent)]" />
               Reprendre/écraser
             </label>
-            <Button variant="accent" onClick={runSweep} disabled={!sweepVersion.trim()}>
+            <Button variant="accent" onClick={runSweep} disabled={!preflight?.ready || !sweepVersion.trim()}>
               Lancer le sweep complet
             </Button>
           </div>
@@ -289,7 +298,7 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
                 <Pill>{cfg.dataset_version}</Pill>
                 {cfg.has_result && <span className="text-success text-xs font-medium">✓ résultat</span>}
               </div>
-              <Button onClick={() => startTraining(cfg.filename)} className="w-full">
+              <Button onClick={() => startTraining(cfg.filename)} disabled={!preflight?.ready} className="w-full">
                 Lancer
               </Button>
             </Card>
@@ -337,6 +346,12 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
                     </button>
                   )}
                 </div>
+                {activeJob.status === "failed" && activeJob.error_message ? (
+                  <Card className="border-error/30 bg-error-soft text-sm">
+                    <p className="text-error font-medium">{activeJob.error_message}</p>
+                    {activeJob.suggestion ? <p className="text-text-secondary mt-1">{activeJob.suggestion}</p> : null}
+                  </Card>
+                ) : null}
                 {metrics.length > 0 && (
                   <Card>
                     <p className="text-text-muted text-xs uppercase tracking-wide mb-3">Loss en direct</p>

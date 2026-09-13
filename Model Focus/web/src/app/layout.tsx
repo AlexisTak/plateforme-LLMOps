@@ -34,9 +34,12 @@ const NAV = [
   { href: "/dataset", label: "Dataset" },
   { href: "/rag", label: "RAG" },
   { href: "/training", label: "Training" },
+  { href: "/benchmarks", label: "Benchmarks" },
+  { href: "/enterprise", label: "Entreprise" },
   { href: "/chat", label: "Chat" },
   { href: "/system", label: "System" },
   { href: "/docs", label: "Docs" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

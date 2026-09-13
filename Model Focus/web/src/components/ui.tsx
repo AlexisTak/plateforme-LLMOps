@@ -78,6 +78,11 @@ const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
   completed: { dot: "bg-success", text: "text-success" },
   failed: { dot: "bg-error", text: "text-error" },
   stopped: { dot: "bg-text-muted", text: "text-text-muted" },
+  draft: { dot: "bg-text-muted", text: "text-text-muted" },
+  evaluated: { dot: "bg-info", text: "text-info" },
+  approved: { dot: "bg-accent", text: "text-accent" },
+  production: { dot: "bg-success", text: "text-success" },
+  archived: { dot: "bg-text-muted", text: "text-text-muted" },
 };
 
 export function StatusBadge({ status }: { status: string }) {

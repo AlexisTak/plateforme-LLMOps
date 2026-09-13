@@ -1,5 +1,10 @@
 # Environment Audit — Biscuits Focus
 
+> Ce document conserve l'audit matériel Windows d'origine. Le projet dispose
+> désormais aussi de scripts Linux (`setup-linux.sh`, `start.sh`, `stop.sh`) ;
+> les valeurs système ci-dessous ne décrivent donc pas toutes les machines prises
+> en charge.
+
 Date: 2026-08-17
 
 ## System

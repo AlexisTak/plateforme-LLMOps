@@ -36,7 +36,7 @@ def get_report(project: Path = Depends(project_dir)):
     metadata = report.get("metadata", {})
     return {"content": report_path.read_text(encoding="utf-8"), "path": str(report_path),
             "metadata": metadata, "stale_reasons": stale_reasons(project, metadata),
-            "comparison": report.get("comparison")}
+            "comparison": report.get("comparison"), "outputs": report.get("outputs", {})}
 
 
 @router.get("/evaluation/report/summary")

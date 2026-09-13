@@ -8,13 +8,19 @@ the ML pipeline itself. Run with:
 
 from __future__ import annotations
 from contextlib import asynccontextmanager
+import json
+import logging
+import time
+import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from api.jobs import registry
 
-from api.routes import chat, dataset, evaluation, experiments, jobs, projects, rag, system, training
+from api.enterprise import actor_from_request, metrics, require_role, store
+from api.routes import chat, dataset, enterprise, evaluation, experiments, jobs, projects, rag, system, training
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +37,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def observability_and_audit(request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    started = time.perf_counter()
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        try:
+            require_role(actor_from_request(request), "operator")
+        except HTTPException as exc:
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            duration_ms = (time.perf_counter() - started) * 1000
+            metrics.observe(request.method, response.status_code, duration_ms)
+            response.headers["x-request-id"] = request_id
+            return response
+    parts = request.url.path.split("/")
+    if len(parts) > 3 and parts[2] == "projects":
+        try:
+            store.require_project_role(parts[3], actor_from_request(request), "viewer")
+        except HTTPException as exc:
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            response.headers["x-request-id"] = request_id
+            metrics.observe(request.method, response.status_code, (time.perf_counter() - started) * 1000)
+            return response
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - started) * 1000
+    metrics.observe(request.method, response.status_code, duration_ms)
+    response.headers["x-request-id"] = request_id
+    logging.getLogger("biscuits.http").info(json.dumps({"request_id": request_id, "method": request.method,
+        "path": request.url.path, "status": response.status_code, "duration_ms": round(duration_ms, 2)}))
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and response.status_code < 400 and not request.url.path.startswith("/api/enterprise"):
+        try:
+            current = actor_from_request(request)
+            project_id = parts[3] if len(parts) > 3 and parts[2] == "projects" else None
+            store.audit(current.id, f"http.{request.method.lower()}", "api", request.url.path, project_id,
+                        {"status": response.status_code, "request_id": request_id})
+        except Exception:
+            logging.getLogger(__name__).exception("Impossible d’écrire l’audit")
+    return response
+
 app.include_router(dataset.router)
 app.include_router(experiments.router)
 app.include_router(training.router)
@@ -40,6 +85,7 @@ app.include_router(chat.router)
 app.include_router(rag.router)
 app.include_router(system.router)
 app.include_router(projects.router)
+app.include_router(enterprise.router)
 
 
 @app.get("/api/health")

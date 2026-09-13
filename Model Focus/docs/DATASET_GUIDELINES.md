@@ -29,7 +29,6 @@ Hugging Face `datasets`-compatible JSONL, one conversation per line:
 | `tasks` | task_breakdown, next_action, capture mentale (unstructured brain-dump -> structured list) |
 | `overwhelm` | reducing complexity, picking ONE action, non-judgmental tone, short replies |
 | `planning` | prioritization (urgency + importance + duration + energy + deadline + context, never a single-axis sort), interruption/resume handling |
-| `safety` | refusing *personalized* diagnosis/dosage/prescription questions ("do I have ADHD", "should I take/stop X", "what dose") while still offering organizational help where appropriate. **General factual questions about ADHD or its treatments** ("how does methylphenidate work", "is ADHD curable") are answered factually instead — see `conversations` for those examples — never refused just for touching the topic of medication/diagnosis in the abstract. |
 
 ## French requirement
 
@@ -64,4 +63,3 @@ Dataset directories/snapshots are tagged `dataset-vX.Y` (e.g. `dataset-v0.1`). E
 
 - Large factual knowledge dumps (organizational methods, product docs) — that's RAG's job, see [rag/](../rag).
 - User-specific data (names, real project details) — that's user memory, never trained into weights.
-- A **personalized** diagnosis, dosage, or prescription recommendation as a *correct* assistant answer — that's always `safety`-category refusal territory, no exception. General, non-personalized factual education about ADHD or how a treatment works in general is fine in `conversations` (revised — see the `safety` row above); the line is "about this specific person" vs "about the topic in general".

@@ -45,8 +45,8 @@ def test_history_api_rejects_injected_roles_and_excessive_input():
                                         ('{"intent":"task_breakdown"}', False),
                                         ('```json\n{}\n```', False), ("[1, 2]", False)])
 def test_plain_text_contract_ignores_legacy_json_expectations(text, valid):
-    item = {"id": "a", "category": "tasks", "checks": {"expect_json": True, "expect_keys": ["intent"],
-             "max_chars": 100, "safety_refusal_expected": False}}
+    item = {"id": "a", "category": "tasks", "review": ["Réponse utile"], "checks": {"expect_json": True, "expect_keys": ["intent"],
+             "max_chars": 100}}
     result = score(item, text)
     assert result["plain_text"] is valid
     assert result["json_valid"] is None
@@ -60,14 +60,15 @@ def test_output_mode_supports_natural_json_and_flexible_projects():
     assert output_suffix("json") == JSON_SUFFIX
     assert output_suffix("flexible") == ""
 
-    item = {"id": "agent", "category": "tool-use", "checks": {
+    item = {"id": "agent", "category": "tool-use", "review": ["Action correcte"], "checks": {
         "expect_json": True, "expect_keys": ["action"], "max_chars": 200,
-        "safety_refusal_expected": False,
     }}
     valid = score(item, '{"action":"search"}', output_mode="json")
     invalid = score(item, "Je vais chercher.", output_mode="json")
     assert valid["json_valid"] and valid["has_expected_keys"]
     assert not invalid["json_valid"] and not invalid["has_expected_keys"]
+
+
 
 
 def test_project_creation_scaffolds_the_selected_domain(monkeypatch, tmp_path):
@@ -90,8 +91,25 @@ def test_project_creation_scaffolds_the_selected_domain(monkeypatch, tmp_path):
     assert (root / "datasets" / "code-generation").is_dir()
     assert "pull requests Python" in (root / "training/configs/system_prompt.txt").read_text(encoding="utf-8")
     benchmark = [json.loads(line) for line in (root / "evaluation/benchmark.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(benchmark) == 4
+    assert len(benchmark) == 8
     assert all(item["checks"]["expect_json"] for item in benchmark)
+    assert all(item["review"] for item in benchmark)
+
+
+def test_project_creation_rejects_an_ollama_model_name(monkeypatch, tmp_path):
+    from api.routes import projects
+    from api.schemas import CreateProjectRequest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path)
+    with pytest.raises(HTTPException, match="identifiant HF"):
+        projects.create_project(CreateProjectRequest(
+            id="invalid-model",
+            base_model="hermes/hermes:3b",
+            project_type="agent",
+            purpose="Tester des tickets",
+            output_mode="natural",
+        ))
 
 
 @pytest.fixture

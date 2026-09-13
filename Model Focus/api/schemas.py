@@ -172,6 +172,21 @@ class TrainingMetricPoint(BaseModel):
     learning_rate: float | None = None
 
 
+class ModelPreflight(BaseModel):
+    model: str
+    ready: bool
+    accessible: bool
+    architecture: str | None = None
+    parameter_count: int | None = None
+    estimated_download_gb: float | None = None
+    estimated_vram_gb: float | None = None
+    available_vram_gb: float | None = None
+    cuda_available: bool
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    technical_detail: str | None = None
+
+
 class JobStatus(BaseModel):
     job_id: str
     kind: Literal["training", "evaluation", "reindex", "pipeline", "sweep"]
@@ -182,6 +197,9 @@ class JobStatus(BaseModel):
     return_code: int | None = None
     log_tail: list[str] = []
     result: dict[str, Any] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    suggestion: str | None = None
 
 
 class ChatTurn(BaseModel):
@@ -206,6 +224,21 @@ class SystemHealth(BaseModel):
     gpu: dict[str, Any] | None
     disk: dict[str, Any]
     ollama: dict[str, Any]
+
+
+class BenchmarkChecks(BaseModel):
+    expect_json: bool = False
+    expect_keys: list[str] = Field(default_factory=list)
+    max_chars: int = Field(ge=1, le=100000)
+    expect_plain_text: bool = False
+
+
+class BenchmarkCase(BaseModel):
+    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+    category: str = Field(min_length=1, max_length=100)
+    user: str = Field(min_length=1, max_length=20000)
+    checks: BenchmarkChecks
+    review: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(min_length=1, max_length=20)
 
 
 class ChatResponse(BaseModel):
@@ -264,6 +297,7 @@ class Project(BaseModel):
     purpose: str = "Assistant généraliste"
     output_mode: Literal["natural", "json", "flexible"] = "natural"
     ollama_equivalent: str | None = None
+    inference_model: str | None = None
     added_at: str
     dataset_examples: int = 0
     rag_documents: int = 0
@@ -279,3 +313,29 @@ class CreateProjectRequest(BaseModel):
     output_mode: Literal["natural", "json", "flexible"] = "natural"
     system_prompt: str | None = Field(default=None, max_length=12000)
     ollama_equivalent: str | None = None
+
+
+class UpdateInferenceRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
+class ProjectSettings(BaseModel):
+    id: str
+    label: str
+    project_type: Literal["general", "agent", "developer", "business"]
+    purpose: str
+    output_mode: Literal["natural", "json", "flexible"]
+    base_model: str
+    inference_model: str
+    system_prompt: str
+    max_assistant_chars: int
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    project_type: Literal["general", "agent", "developer", "business"]
+    purpose: str = Field(min_length=3, max_length=2000)
+    output_mode: Literal["natural", "json", "flexible"]
+    inference_model: str = Field(min_length=1, max_length=200)
+    system_prompt: str = Field(min_length=1, max_length=12000)
+    max_assistant_chars: int = Field(ge=100, le=100000)

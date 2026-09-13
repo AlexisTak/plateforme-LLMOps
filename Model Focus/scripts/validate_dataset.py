@@ -19,19 +19,6 @@ from pathlib import Path
 
 VALID_ROLES = {"system", "user", "assistant"}
 MAX_ASSISTANT_CHARS = 1500
-SENSITIVE_PATTERNS = [
-    re.compile(r"\b\d{13,19}\b"),  # card-like numbers
-    re.compile(r"\b(?:\d[ -]?){13,19}\b"),
-    re.compile(r"\bIBAN\b", re.IGNORECASE),
-    re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b.{0,20}\b(né|naissance)\b", re.IGNORECASE),
-]
-MEDICAL_CLAIM_PATTERNS = [
-    re.compile(r"\btu as (le|un) tdah\b", re.IGNORECASE),
-    re.compile(r"\bje te (diagnostique|prescris)\b", re.IGNORECASE),
-    re.compile(r"\bprends? (du|de la|le|la)\s+\w+(mg|mcg)\b", re.IGNORECASE),
-]
-
-
 class Finding:
     def __init__(self, file: str, line: int, level: str, message: str):
         self.file = file
@@ -48,7 +35,6 @@ def validate_example(
     file: str,
     line_no: int,
     *,
-    medical_safety: bool = True,
     max_assistant_chars: int = MAX_ASSISTANT_CHARS,
 ) -> list[Finding]:
     findings: list[Finding] = []
@@ -87,15 +73,6 @@ def validate_example(
                     json.loads(stripped)
                 except json.JSONDecodeError as e:
                     findings.append(Finding(file, line_no, "error", f"assistant content looks like JSON but is invalid: {e}"))
-            if medical_safety:
-                for pat in MEDICAL_CLAIM_PATTERNS:
-                    if pat.search(content):
-                        findings.append(Finding(file, line_no, "error", f"possible medical diagnosis/prescription claim: matched {pat.pattern!r}"))
-
-        for pat in SENSITIVE_PATTERNS:
-            if pat.search(content):
-                findings.append(Finding(file, line_no, "warning", f"possible sensitive data in {role} content: matched {pat.pattern!r}"))
-
     if "user" not in roles_seen:
         findings.append(Finding(file, line_no, "error", "no 'user' message present"))
     if "assistant" not in roles_seen:
