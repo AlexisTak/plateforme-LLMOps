@@ -99,7 +99,8 @@ function ProjectChat({ projectId }: { projectId: string }) {
       if (!active) return;
       setAdapters(r.adapters);
       try {
-        const saved = localStorage.getItem(`biscuits-focus:adapter:${projectId}`);
+        const saved = localStorage.getItem(`openagent:adapter:${projectId}`)
+          || localStorage.getItem(`biscuits-focus:adapter:${projectId}`);
         setAdapter(saved && r.adapters.includes(saved) ? saved : null);
       } catch { /* storage can be disabled; base model remains available */ }
       setReady(true);
@@ -110,17 +111,26 @@ function ProjectChat({ projectId }: { projectId: string }) {
   const send = async () => {
     if (!input.trim() || busy || !ready) return;
     const message = input.trim();
-    setTurns((t) => [...t, { role: "user", content: message }]);
+    const previousTurns = turns;
+    setTurns([...previousTurns, { role: "user", content: message }, { role: "assistant", content: "" }]);
     setInput("");
     setBusy(true);
     setError(null);
     try {
-      const history = turns.slice(-12).map(({ role, content }) => ({ role, content }));
-      const res = await api.chat.send(projectId, message, adapter, rag, undefined, history,
-        preferences.trim() ? { preferences: preferences.trim() } : {});
-      setTurns((t) => [...t, { role: "assistant", content: res.response, ragChunks: res.rag_chunks }]);
+      const history = previousTurns.slice(-12).map(({ role, content }) => ({ role, content }));
+      await api.chat.stream(projectId, message, adapter, rag, history,
+        preferences.trim() ? { preferences: preferences.trim() } : {}, (event, payload) => {
+          if (event === "token") {
+            setTurns((current) => current.map((turn, index) => index === current.length - 1
+              ? { ...turn, content: turn.content + String(payload.text || "") } : turn));
+          }
+          if (event === "metadata" && Array.isArray(payload.rag_chunks)) {
+            setTurns((current) => current.map((turn, index) => index === current.length - 1
+              ? { ...turn, ragChunks: payload.rag_chunks as string[] } : turn));
+          }
+        });
     } catch (e) {
-      setTurns(turns);
+      setTurns(previousTurns);
       setInput(message);
       setError(String(e));
     } finally {
@@ -150,7 +160,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
               aria-label="Modèle du projet"
               onChange={(e) => {
                 setAdapter(e.target.value || null);
-                try { localStorage.setItem(`biscuits-focus:adapter:${projectId}`, e.target.value); } catch { /* optional */ }
+                try { localStorage.setItem(`openagent:adapter:${projectId}`, e.target.value); } catch { /* optional */ }
               }}
               className="bg-surface border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
             >
@@ -195,7 +205,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
             </div>
           );
         })}
-        {busy && <p className="text-text-muted text-xs">…génération en cours</p>}
+        {busy && <p className="text-text-muted text-xs">…réponse reçue en direct</p>}
       </div>
 
       <div className="flex gap-2 mt-3">

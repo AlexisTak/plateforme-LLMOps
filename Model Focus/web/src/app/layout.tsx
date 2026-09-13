@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { Fraunces, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
+import Image from "next/image";
 import Link from "next/link";
-import { NavLink } from "@/components/nav-link";
+import { NavMenu } from "@/components/nav-menu";
 import { HealthBadge } from "@/components/health-badge";
 import { ProjectSwitcher } from "@/components/project-switcher";
 import { ProjectProvider } from "@/lib/project-context";
@@ -17,49 +18,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-  weight: ["500", "600"],
-  style: ["normal"],
-});
-
 export const metadata: Metadata = {
-  title: "Biscuits Focus — Console",
-  description: "Dataset, training, evaluation and chat console for Biscuits Focus.",
+  title: "OpenAgent — Console",
+  description: "Console de création, d’évaluation et d’exploitation d’agents IA.",
 };
-
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/dataset", label: "Dataset" },
-  { href: "/rag", label: "RAG" },
-  { href: "/training", label: "Training" },
-  { href: "/benchmarks", label: "Benchmarks" },
-  { href: "/enterprise", label: "Entreprise" },
-  { href: "/chat", label: "Chat" },
-  { href: "/system", label: "System" },
-  { href: "/docs", label: "Docs" },
-  { href: "/settings", label: "Settings" },
-];
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="fr"
-      className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-bg text-text-primary font-sans" suppressHydrationWarning>
         <ProjectProvider>
-          <header className="relative border-b border-border px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-4 lg:gap-x-8 gap-y-2 sticky top-0 bg-bg/90 backdrop-blur-sm z-10">
-            <Link href="/" className="flex items-center gap-2 shrink-0">
-              <span className="text-xl leading-none">🍪</span>
-              <span className="font-display text-[17px] tracking-tight text-text-primary">Biscuits Focus</span>
+          <header className="relative border-b border-border px-4 sm:px-6 py-3.5 flex flex-wrap items-center gap-x-4 lg:gap-x-8 gap-y-2 sticky top-0 bg-bg/90 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.18)] z-10">
+            <Link href="/" aria-label="OpenAgent — Accueil" className="shrink-0 rounded-lg bg-white px-2 py-1 shadow-[0_0_20px_rgba(79,140,255,0.16)] ring-1 ring-white/10 transition-transform hover:scale-[1.02]">
+              <Image src="/logo.png" alt="OpenAgent" width={2172} height={724} priority className="h-7 w-auto" />
             </Link>
-            <nav className="order-3 lg:order-none w-full lg:w-auto flex gap-1 text-sm overflow-x-auto">
-              {NAV.map((item) => (
-                <NavLink key={item.href} href={item.href} label={item.label} />
-              ))}
-            </nav>
+            <NavMenu />
             <ProjectSwitcher />
             <HealthBadge />
           </header>

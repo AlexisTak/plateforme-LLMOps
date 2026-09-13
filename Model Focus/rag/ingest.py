@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import io
 import re
+import zipfile
+from xml.etree import ElementTree
 
 from pypdf import PdfReader
 
 MAX_UPLOAD_BYTES = 150 * 1024 * 1024  # 150 MB — a few hundred pages of text-bearing PDF, catches accidental huge binaries
-SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 
 class IngestError(ValueError):
@@ -37,6 +39,8 @@ def extract_text(filename: str, raw: bytes) -> str:
 
     if ext == ".pdf":
         text = _extract_pdf_text(raw)
+    elif ext == ".docx":
+        text = _extract_docx_text(raw)
     else:
         try:
             text = raw.decode("utf-8")
@@ -69,3 +73,22 @@ def _extract_pdf_text(raw: bytes) -> str:
         raise IngestError("no extractable text found — this PDF may be scanned images without OCR text")
 
     return "\n\n".join(pages_text)
+
+
+def _extract_docx_text(raw: bytes) -> str:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            xml = archive.read("word/document.xml")
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise IngestError(f"could not read DOCX: {exc}") from exc
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError as exc:
+        raise IngestError(f"could not parse DOCX: {exc}") from exc
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    paragraphs = []
+    for paragraph in root.iter(namespace + "p"):
+        text = "".join(node.text or "" for node in paragraph.iter(namespace + "t")).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n\n".join(paragraphs)

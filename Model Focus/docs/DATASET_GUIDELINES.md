@@ -1,4 +1,4 @@
-# Dataset Guidelines — Biscuits Focus
+# Dataset Guidelines — OpenAgent
 
 ## Principle
 

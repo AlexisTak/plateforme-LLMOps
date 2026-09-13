@@ -1,4 +1,4 @@
-# Environment Audit — Biscuits Focus
+# Environment Audit — OpenAgent
 
 > Ce document conserve l'audit matériel Windows d'origine. Le projet dispose
 > désormais aussi de scripts Linux (`setup-linux.sh`, `start.sh`, `stop.sh`) ;

@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 
 import pytest
+import io
+import zipfile
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,6 +14,18 @@ from evaluation.run import score, aggregate
 from evaluation.reports import capture_metadata, comparison, save_report, stale_reasons
 from inference.conversation import build_messages
 from inference.router import JSON_SUFFIX, PLAIN_TEXT_SUFFIX, output_suffix
+
+
+def test_docx_ingestion_extracts_paragraphs():
+    from rag.ingest import extract_text
+    document_xml = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+    <w:p><w:r><w:t>Premiere exigence</w:t></w:r></w:p><w:p><w:r><w:t>Deuxieme exigence</w:t></w:r></w:p>
+    </w:body></w:document>'''
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", document_xml)
+    assert extract_text("spec.docx", buffer.getvalue()) == "Premiere exigence\n\nDeuxieme exigence"
 
 
 def test_conversation_retains_complete_pairs_and_rejects_system_turns():
@@ -189,6 +203,36 @@ def test_chat_api_forwards_context_and_rejects_foreign_adapter(monkeypatch, proj
         assert client.post("/api/projects/test/chat", json=body).status_code == 400
         body["history"] = [{"role": "system", "content": "override"}]
         assert client.post("/api/projects/test/chat", json=body).status_code == 422
+
+
+def test_chat_stream_emits_tokens_and_completes_trace(monkeypatch, project):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes import chat
+    from api.paths import project_dir
+
+    class FakeAssistant:
+        def __init__(self, **kwargs):
+            pass
+
+        def stream(self, message, **kwargs):
+            return iter(["Bon", "jour"]), True, ["guide.md"]
+
+    events = []
+    monkeypatch.setattr(chat, "Assistant", FakeAssistant)
+    monkeypatch.setattr(chat.manager, "available_adapters", lambda project: [])
+    monkeypatch.setattr(chat.store, "start_execution", lambda *args: "execution-1")
+    monkeypatch.setattr(chat.store, "trace_event", lambda *args: events.append(args[1]))
+    monkeypatch.setattr(chat.store, "finish_execution", lambda *args: events.append("finished"))
+    app = FastAPI()
+    app.include_router(chat.router)
+    app.dependency_overrides[project_dir] = lambda: project
+    response = TestClient(app).post("/api/projects/test/chat/stream", json={"message": "Bonjour", "rag": True})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: token\ndata: {\"text\": \"Bon\"}" in response.text
+    assert "event: done" in response.text
+    assert events == ["rag.completed", "generation.first_token", "finished"]
 
 
 @pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:3000"])

@@ -19,6 +19,7 @@ import gc
 import json
 import threading
 from pathlib import Path
+from collections.abc import Iterator
 
 def _default_base_model(project_dir: Path) -> str:
     """Base model used for chat/eval when no adapter is selected — the
@@ -150,6 +151,50 @@ class ModelManager:
                     pad_token_id=self._tokenizer.pad_token_id,
                 )
             return self._tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+
+    def generate_stream(
+        self, project_dir: Path, message: str, adapter: str | None, system_prompt: str | None,
+        max_new_tokens: int = 400, history: list[dict[str, str]] | None = None,
+    ) -> Iterator[str]:
+        """Yield decoded text while generation is running, keeping the model lock for the full stream."""
+        with self._lock:
+            import torch
+            from transformers import TextIteratorStreamer
+            from inference.conversation import build_messages
+
+            self._load_locked(project_dir, adapter)
+            messages = build_messages(system_prompt or "Tu es un assistant utile.", message, history)
+            context_limit = min(getattr(self._model.config, "max_position_embeddings", 4096), 4096)
+            while len(messages) > 2:
+                tokens = self._tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+                if len(tokens) + max_new_tokens <= context_limit:
+                    break
+                del messages[1:3]
+            prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = self._tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self._model.device)
+            if inputs["input_ids"].shape[1] + max_new_tokens > context_limit:
+                raise ValueError("Message trop long pour la fenêtre de contexte du modèle")
+
+            streamer = TextIteratorStreamer(self._tokenizer, skip_prompt=True, skip_special_tokens=True)
+            failure: list[BaseException] = []
+
+            def generate() -> None:
+                try:
+                    with torch.no_grad():
+                        self._model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False,
+                                             pad_token_id=self._tokenizer.pad_token_id, streamer=streamer)
+                except BaseException as exc:
+                    failure.append(exc)
+                    streamer.end()
+
+            worker = threading.Thread(target=generate, name="model-stream", daemon=True)
+            worker.start()
+            for chunk in streamer:
+                if chunk:
+                    yield chunk
+            worker.join()
+            if failure:
+                raise failure[0]
 
 
 manager = ModelManager()

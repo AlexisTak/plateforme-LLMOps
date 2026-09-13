@@ -1,26 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0b0d10;
-  --surface: #14171c;
-  --surface-hover: #1b1f26;
-  --border: #262b33;
-  --border-strong: #383f4a;
+  --bg: #080d18;
+  --surface: #101827;
+  --surface-hover: #172236;
+  --border: #26344a;
+  --border-strong: #3a4c68;
 
-  --text-primary: #edeef0;
-  --text-secondary: #b6bcc6;
-  --text-muted: #7a828e;
+  --text-primary: #f1f5fb;
+  --text-secondary: #b7c3d4;
+  --text-muted: #7f8da3;
 
-  --accent: #e0a458;
-  --accent-soft: #2c2116;
-  --accent-strong: #f0b96e;
+  --accent: #4f8cff;
+  --accent-soft: #14274a;
+  --accent-strong: #78a7ff;
 
-  --success: #6ebe8a;
-  --success-soft: #16241c;
-  --error: #e2726e;
-  --error-soft: #2a1817;
-  --info: #7aa6d9;
-  --info-soft: #16202c;
+  --success: #42c59a;
+  --success-soft: #102a25;
+  --error: #f0787f;
+  --error-soft: #301a24;
+  --info: #65a7e8;
+  --info-soft: #12263e;
 }
 
 @theme inline {
@@ -47,11 +47,13 @@
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-display: var(--font-fraunces);
+  --font-display: var(--font-geist-sans);
 }
 
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 50% -20%, rgba(79, 140, 255, 0.12), transparent 36rem),
+    var(--bg);
   color: var(--text-primary);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }

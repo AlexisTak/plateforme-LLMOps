@@ -1,4 +1,9 @@
-# Biscuits Focus
+# OpenAgent
+
+La spécification produit de référence est
+[`Cahier_des_charges_OpenAgent_Enterprise.docx`](Cahier_des_charges_OpenAgent_Enterprise.docx).
+La couverture exigence par exigence et les prochains lots sont suivis dans
+[`docs/OPENAGENT_SPEC_MAPPING.md`](docs/OPENAGENT_SPEC_MAPPING.md).
 
 Les changements récents du chat, de l'évaluation et des jobs sont décrits dans
 [docs/RUNTIME_FIXES.md](docs/RUNTIME_FIXES.md). Les rapports historiques JSON
@@ -70,9 +75,9 @@ Dataset -> Cleaning -> Validation -> Split -> SFT (LoRA/QLoRA) -> Evaluation
 ```bash
 python scripts/merge_adapter.py --adapter experiment_003        # LoRA -> standalone HF model
 python .llama-cpp-tools/convert_hf_to_gguf.py models/merged/experiment_003 --outtype f16 \
-    --outfile models/quantized/biscuits-focus-f16.gguf          # HF -> GGUF f16
-cd models/quantized && ollama create biscuits-focus -f Modelfile -q q4_K_M
-ollama run biscuits-focus
+    --outfile models/quantized/openagent-f16.gguf          # HF -> GGUF f16
+cd models/quantized && ollama create openagent -f Modelfile -q q4_K_M
+ollama run openagent
 ```
 
 `.llama-cpp-tools/` is a shallow clone of llama.cpp, only used for `convert_hf_to_gguf.py` (not built — no C++ compiler needed on Windows; Ollama does the actual quantization). Re-clone with `git clone --depth 1 https://github.com/ggml-org/llama.cpp.git .llama-cpp-tools` if missing.

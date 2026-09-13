@@ -3,7 +3,8 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import { api, Project } from "@/lib/api";
 
-const STORAGE_KEY = "biscuits-focus:active-project";
+const STORAGE_KEY = "openagent:active-project";
+const LEGACY_STORAGE_KEY = "biscuits-focus:active-project";
 
 type ProjectContextValue = {
   projectId: string | null;
@@ -35,7 +36,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         setError(null);
         setProjectIdState((current) => {
           if (current && list.some((proj) => proj.id === current)) return current;
-          const stored = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
+          const stored = typeof window !== "undefined"
+            ? window.localStorage.getItem(STORAGE_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEY)
+            : null;
           const resolved = stored && list.some((proj) => proj.id === stored) ? stored : list[0]?.id ?? null;
           if (resolved && typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, resolved);
           return resolved;

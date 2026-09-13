@@ -246,6 +246,7 @@ class ChatResponse(BaseModel):
     adapter: str | None
     rag_used: bool = False
     rag_chunks: list[str] = []
+    execution_id: str | None = None
 
 
 class RagSearchRequest(BaseModel):
@@ -290,7 +291,7 @@ class Project(BaseModel):
     a project is meant to feel like switching accounts: nothing is shared with
     any other project except the code itself (see api/routes/projects.py)."""
 
-    id: str  # filesystem-safe slug, also the unique key — e.g. "biscuits-focus"
+    id: str  # filesystem-safe slug, also the unique key — e.g. "openagent-demo"
     base_model: str  # HF repo id used for training/inference in this project
     label: str
     project_type: Literal["general", "agent", "developer", "business"] = "general"

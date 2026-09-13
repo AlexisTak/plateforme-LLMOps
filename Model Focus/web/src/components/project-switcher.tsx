@@ -22,38 +22,6 @@ export function ProjectSwitcher() {
   const [outputMode, setOutputMode] = useState<Project["output_mode"]>("natural");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [llmOpen, setLlmOpen] = useState(false);
-  const [model, setModel] = useState("");
-  const [savingLlm, setSavingLlm] = useState(false);
-
-  const openLlm = async () => {
-    if (!projectId) return;
-    setError(null);
-    try {
-      const config = await api.projects.inference(projectId);
-      setModel(config.model);
-      setLlmOpen(true);
-      setOpen(false);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  const saveLlm = async () => {
-    if (!projectId || !model.trim()) return;
-    setSavingLlm(true);
-    setError(null);
-    try {
-      await api.projects.updateInference(projectId, model.trim());
-      setLlmOpen(false);
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSavingLlm(false);
-    }
-  };
-
   const create = async () => {
     setError(null);
     if (!newId.trim() || !newBaseModel.trim() || !purpose.trim()) return;
@@ -101,14 +69,6 @@ export function ProjectSwitcher() {
           API indisponible — réessayer
         </button>
       )}
-      <button
-        onClick={openLlm}
-        disabled={!projectId}
-        className="text-text-secondary hover:text-text-primary text-sm px-2 py-1 rounded-md hover:bg-surface-hover transition-colors disabled:opacity-40"
-        title="Changer le fournisseur et le modèle d’inférence"
-      >
-        LLM
-      </button>
       <button
         onClick={() => setOpen((v) => !v)}
         className="text-text-secondary hover:text-text-primary text-sm px-2 py-1 rounded-md hover:bg-surface-hover transition-colors"
@@ -186,7 +146,7 @@ export function ProjectSwitcher() {
             <button
               onClick={create}
               disabled={!newId.trim() || !newBaseModel.trim() || !purpose.trim()}
-              className="flex-1 bg-accent text-[#20140a] hover:bg-accent-strong disabled:opacity-40 px-3 py-1.5 text-sm rounded-md font-medium transition-colors"
+              className="flex-1 bg-accent text-white hover:bg-accent-strong disabled:opacity-40 px-3 py-1.5 text-sm rounded-md font-medium transition-colors"
             >
               Créer
             </button>
@@ -194,36 +154,6 @@ export function ProjectSwitcher() {
               onClick={() => setOpen(false)}
               className="text-text-secondary hover:text-text-primary text-sm px-3 py-1.5 rounded-md hover:bg-surface-hover transition-colors"
             >
-              Annuler
-            </button>
-          </div>
-        </div>
-      )}
-      {llmOpen && (
-        <div className="absolute top-14 right-4 sm:right-6 bg-surface border border-border rounded-lg p-4 space-y-3 shadow-lg z-20 w-[min(26rem,calc(100vw-2rem))]">
-          <div>
-            <p className="font-medium text-sm text-text-primary">Modèle d&apos;inférence</p>
-            <p className="text-text-muted text-xs mt-1">Modèle Hugging Face local utilisé par le Chat et les Benchmarks.</p>
-          </div>
-          {error && <p className="text-error text-xs">{error}</p>}
-          <label className="block text-xs text-text-muted space-y-1">
-            Identifiant du modèle
-            <input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="org/modèle-hugging-face"
-              className="w-full bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              onClick={saveLlm}
-              disabled={!model.trim() || savingLlm}
-              className="flex-1 bg-accent text-[#20140a] hover:bg-accent-strong disabled:opacity-40 px-3 py-1.5 text-sm rounded-md font-medium transition-colors"
-            >
-              {savingLlm ? "Enregistrement…" : "Utiliser ce modèle"}
-            </button>
-            <button onClick={() => setLlmOpen(false)} className="text-text-secondary hover:text-text-primary text-sm px-3 py-1.5 rounded-md hover:bg-surface-hover">
               Annuler
             </button>
           </div>

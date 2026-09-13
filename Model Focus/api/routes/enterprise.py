@@ -5,13 +5,17 @@ import os
 import hashlib
 import io
 import zipfile
+import re
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+import requests
 
 from api.enterprise import Actor, actor_from_request, metrics, require_role, store
 from api.jobs import registry
+from api.mcp_client import McpError, StreamableHttpClient
 from api.paths import project_dir
 from evaluation.reports import stale_reasons
 
@@ -38,6 +42,47 @@ class MemberUpdate(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     name: str = Field(min_length=1, max_length=200)
     role: str
+
+
+class ProviderUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    type: str = Field(pattern=r"^(ollama|openai-compatible|anthropic-compatible)$")
+    base_url: str = Field(min_length=8, max_length=500)
+    model: str = Field(min_length=1, max_length=200)
+    api_key_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]{1,99}$")
+    enabled: bool = True
+
+
+class ToolUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    method: str = Field(pattern=r"^(GET|POST)$")
+    url: str = Field(min_length=8, max_length=500)
+    approval_required: bool = False
+    timeout_seconds: int = Field(default=5, ge=1, le=30)
+    max_response_bytes: int = Field(default=100000, ge=100, le=1000000)
+
+
+class ToolExecute(BaseModel):
+    arguments: dict = Field(default_factory=dict)
+
+
+class ApprovalDecision(BaseModel):
+    decision: str = Field(pattern=r"^(approved|denied)$")
+
+
+class ToolPolicyUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    effect: str = Field(pattern=r"^(allow|deny|require_approval)$")
+    tool_id: str | None = None
+    priority: int = Field(default=100, ge=0, le=1000)
+    enabled: bool = True
+
+
+class McpServerUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    url: str = Field(min_length=8, max_length=500)
+    api_key_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]{1,99}$")
+    enabled: bool = True
 
 
 def actor(request: Request) -> Actor:
@@ -205,3 +250,252 @@ def backup_project(request: Request, project: Path = Depends(project_dir)):
         archive.writestr(f"{project.name}/BACKUP_MANIFEST.json", json.dumps({"schema_version": 1, "files": manifest}, indent=2))
     store.audit(current.id, "project.backup.created", "project", project.name, project.name, {"files": len(files)})
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project.name}-backup.zip"'})
+
+
+@router.get("/projects/{project_id}/executions")
+def list_executions(request: Request, project: Path = Depends(project_dir), limit: int = 100):
+    store.require_project_role(project.name, actor(request))
+    return store.executions(project.name, limit)
+
+
+@router.get("/projects/{project_id}/executions/{execution_id}")
+def get_execution(execution_id: str, request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request))
+    result = store.execution(project.name, execution_id)
+    if not result:
+        raise HTTPException(404, "Exécution inconnue")
+    return result
+
+
+def _provider_url(value: str) -> str:
+    value = value.rstrip("/")
+    if not re.match(r"^https?://", value):
+        raise HTTPException(400, "L’URL doit commencer par http:// ou https://")
+    return value
+
+
+@router.get("/projects/{project_id}/providers")
+def list_providers(request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request))
+    return store.providers(project.name)
+
+
+@router.put("/projects/{project_id}/providers")
+def update_provider(body: ProviderUpdate, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    result = store.set_provider(project.name, body.name.strip(), body.type, _provider_url(body.base_url),
+                                body.model.strip(), body.api_key_env, body.enabled)
+    store.audit(current.id, "provider.updated", "provider", result["id"], project.name,
+                {"name": result["name"], "type": result["type"], "base_url": result["base_url"]})
+    return result
+
+
+@router.delete("/projects/{project_id}/providers/{provider_id}")
+def delete_provider(provider_id: str, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    if not store.remove_provider(project.name, provider_id):
+        raise HTTPException(404, "Fournisseur inconnu")
+    store.audit(current.id, "provider.removed", "provider", provider_id, project.name)
+    return {"deleted": True}
+
+
+@router.post("/projects/{project_id}/providers/{provider_id}/test")
+def test_provider(provider_id: str, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    provider = next((item for item in store.providers(project.name) if item["id"] == provider_id), None)
+    if not provider:
+        raise HTTPException(404, "Fournisseur inconnu")
+    headers = {}
+    if provider["api_key_env"]:
+        secret = os.getenv(provider["api_key_env"], "")
+        if not secret:
+            raise HTTPException(409, f"Variable {provider['api_key_env']} absente")
+        if provider["type"] == "anthropic-compatible":
+            headers["x-api-key"] = secret
+            headers["anthropic-version"] = "2023-06-01"
+        else:
+            headers["Authorization"] = f"Bearer {secret}"
+    url = provider["base_url"] + ("/api/tags" if provider["type"] == "ollama" else "/v1/models")
+    started = time.perf_counter()
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(502, f"Connexion impossible : {exc}") from exc
+    elapsed = round((time.perf_counter() - started) * 1000, 2)
+    store.audit(current.id, "provider.tested", "provider", provider_id, project.name, {"ok": True, "latency_ms": elapsed})
+    return {"ok": True, "latency_ms": elapsed, "model": provider["model"]}
+
+
+def _mcp_client(project_id: str, server_id: str) -> StreamableHttpClient:
+    server = next((item for item in store.mcp_servers(project_id) if item["id"] == server_id), None)
+    if not server or not server["enabled"]:
+        raise HTTPException(409, "Serveur MCP inconnu ou désactivé")
+    token = None
+    if server["api_key_env"]:
+        token = os.getenv(server["api_key_env"], "")
+        if not token:
+            raise HTTPException(409, f"Variable {server['api_key_env']} absente")
+    return StreamableHttpClient(server["url"], token)
+
+
+def _execute_tool(tool: dict, arguments: dict, project_id: str) -> dict:
+    started = time.perf_counter()
+    try:
+        if tool.get("connector_type") == "mcp":
+            payload = _mcp_client(project_id, tool["connector_id"]).call_tool(tool["action"], arguments)
+            raw = json.dumps(payload, ensure_ascii=False).encode()
+            capped = raw[:tool["max_response_bytes"]]
+            return {"status_code": 200, "bytes": len(capped), "truncated": len(raw) > len(capped),
+                    "preview": capped.decode("utf-8", errors="replace")[:2000],
+                    "duration_ms": round((time.perf_counter()-started)*1000, 2), "protocol": "mcp"}
+        if tool["method"] == "GET":
+            response = requests.get(tool["url"], params=arguments, timeout=tool["timeout_seconds"])
+        else:
+            response = requests.post(tool["url"], json=arguments, timeout=tool["timeout_seconds"])
+        response.raise_for_status()
+    except (requests.RequestException, McpError) as exc:
+        raise HTTPException(502, f"Échec de l’outil : {exc}") from exc
+    raw = response.content[:tool["max_response_bytes"]]
+    return {"status_code": response.status_code, "bytes": len(raw), "truncated": len(response.content) > len(raw),
+            "preview": raw.decode("utf-8", errors="replace")[:2000], "duration_ms": round((time.perf_counter()-started)*1000, 2)}
+
+
+@router.get("/projects/{project_id}/tools")
+def list_tools(request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request))
+    return store.tools(project.name)
+
+
+@router.put("/projects/{project_id}/tools")
+def update_tool(body: ToolUpdate, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    result = store.set_tool(project.name, body.name.strip(), body.method, _provider_url(body.url),
+                            body.approval_required, body.timeout_seconds, body.max_response_bytes)
+    store.audit(current.id, "tool.updated", "tool", result["id"], project.name, {"name": result["name"]})
+    return result
+
+
+@router.post("/projects/{project_id}/tools/{tool_id}/execute")
+def execute_tool(tool_id: str, body: ToolExecute, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "operator")
+    tool = next((item for item in store.tools(project.name) if item["id"] == tool_id), None)
+    if not tool or not tool["enabled"]:
+        raise HTTPException(404, "Outil inconnu ou désactivé")
+    decision = store.evaluate_tool_policy(project.name, tool_id)
+    if decision["effect"] == "deny":
+        store.audit(current.id, "tool.policy.denied", "tool", tool_id, project.name, decision)
+        raise HTTPException(403, decision["reason"])
+    if decision["effect"] == "require_approval":
+        approval = store.request_approval(project.name, tool_id, current.id, body.arguments)
+        store.audit(current.id, "tool.approval.requested", "approval", approval["id"], project.name,
+                    {"tool_id": tool_id, "policy": decision})
+        return {"status": "pending_approval", "approval": approval}
+    result = _execute_tool(tool, body.arguments, project.name)
+    store.audit(current.id, "tool.executed", "tool", tool_id, project.name,
+                {"result": result, "policy": decision})
+    return {"status": "completed", "result": result}
+
+
+@router.get("/projects/{project_id}/approvals")
+def list_approvals(request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request), "reviewer")
+    return store.approvals(project.name)
+
+
+@router.post("/projects/{project_id}/approvals/{approval_id}/decision")
+def decide_approval(approval_id: str, body: ApprovalDecision, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "reviewer")
+    approval = store.approval(project.name, approval_id)
+    if not approval:
+        raise HTTPException(404, "Approbation inconnue")
+    result = None
+    if body.decision == "approved":
+        tool = next((item for item in store.tools(project.name) if item["id"] == approval["tool_id"]), None)
+        if not tool:
+            raise HTTPException(409, "L’outil n’existe plus")
+        policy = store.evaluate_tool_policy(project.name, approval["tool_id"])
+        if policy["effect"] == "deny":
+            store.audit(current.id, "tool.policy.denied", "approval", approval_id, project.name,
+                        {"tool_id": approval["tool_id"], **policy})
+            raise HTTPException(409, "Approbation bloquée : " + policy["reason"])
+        store.claim_approval(project.name, approval_id)
+        try:
+            result = _execute_tool(tool, approval["arguments"], project.name)
+        except HTTPException as exc:
+            store.fail_claimed_approval(project.name, approval_id, current.id, str(exc.detail))
+            store.audit(current.id, "tool.approval.failed", "approval", approval_id, project.name,
+                        {"tool_id": approval["tool_id"], "error": str(exc.detail)})
+            raise
+    decided = store.decide_approval(project.name, approval_id, body.decision, current.id, result)
+    store.audit(current.id, f"tool.approval.{body.decision}", "approval", approval_id, project.name, {"tool_id": approval["tool_id"]})
+    return decided
+
+
+@router.get("/projects/{project_id}/tool-policies")
+def list_tool_policies(request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request))
+    return store.policies(project.name)
+
+
+@router.put("/projects/{project_id}/tool-policies")
+def update_tool_policy(body: ToolPolicyUpdate, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    result = store.set_policy(project.name, body.name.strip(), body.effect, body.tool_id,
+                              body.priority, body.enabled)
+    store.audit(current.id, "tool.policy.updated", "tool_policy", result["id"], project.name,
+                {"name": result["name"], "effect": result["effect"],
+                 "tool_id": result["tool_id"], "priority": result["priority"]})
+    return result
+
+
+@router.delete("/projects/{project_id}/tool-policies/{policy_id}")
+def delete_tool_policy(policy_id: str, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    if not store.remove_policy(project.name, policy_id):
+        raise HTTPException(404, "Politique inconnue")
+    store.audit(current.id, "tool.policy.removed", "tool_policy", policy_id, project.name)
+    return {"deleted": True}
+
+
+@router.get("/projects/{project_id}/mcp-servers")
+def list_mcp_servers(request: Request, project: Path = Depends(project_dir)):
+    store.require_project_role(project.name, actor(request))
+    return store.mcp_servers(project.name)
+
+
+@router.put("/projects/{project_id}/mcp-servers")
+def update_mcp_server(body: McpServerUpdate, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    result = store.set_mcp_server(project.name, body.name.strip(), _provider_url(body.url),
+                                  body.api_key_env, body.enabled)
+    store.audit(current.id, "mcp.server.updated", "mcp_server", result["id"], project.name,
+                {"name": result["name"], "url": result["url"]})
+    return result
+
+
+@router.post("/projects/{project_id}/mcp-servers/{server_id}/sync")
+def sync_mcp_server(server_id: str, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    server = next((item for item in store.mcp_servers(project.name) if item["id"] == server_id), None)
+    if not server or not server["enabled"]:
+        raise HTTPException(404, "Serveur MCP inconnu ou désactivé")
+    try:
+        remote_tools = _mcp_client(project.name, server_id).list_tools()
+    except McpError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    imported = store.sync_mcp_tools(project.name, server_id, remote_tools)
+    skipped = len(remote_tools) - len(imported)
+    store.audit(current.id, "mcp.catalog.synced", "mcp_server", server_id, project.name,
+                {"discovered": len(remote_tools), "imported_read_only": len(imported), "skipped": skipped})
+    return {"discovered": len(remote_tools), "imported": len(imported), "skipped": skipped, "tools": imported}

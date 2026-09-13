@@ -19,6 +19,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -94,3 +95,15 @@ class Assistant:
             rag_used=bool(rag_context and rag_context.context_block),
             rag_chunks=[c.doc_id for c in rag_context.chunks_used] if rag_context else [],
         )
+
+    def stream(self, message: str, user_context: dict | None = None, rag: bool = False,
+               max_new_tokens: int = 400, history: list[dict[str, str]] | None = None
+               ) -> tuple[Iterator[str], bool, list[str]]:
+        full_message, rag_context = self._build_message(message, user_context, rag)
+        chunks = [item.doc_id for item in rag_context.chunks_used] if rag_context else []
+        iterator = manager.generate_stream(
+            project_dir=self.project_dir, message=full_message, adapter=self.adapter,
+            system_prompt=self._resolve_system_prompt(message), max_new_tokens=max_new_tokens,
+            history=history,
+        )
+        return iterator, bool(rag_context and rag_context.context_block), chunks

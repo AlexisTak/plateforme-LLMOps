@@ -69,7 +69,7 @@ export default function DocsPage() {
     <div className="space-y-10">
       <PageHeader
         title="Documentation"
-        description="Comprendre ce que fait Biscuits Focus, comment utiliser chaque écran et à quoi correspondent les termes techniques."
+        description="Comprendre ce que fait OpenAgent, comment utiliser chaque écran et à quoi correspondent les termes techniques."
       />
 
       <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -207,7 +207,7 @@ export default function DocsPage() {
             <p className="text-text-primary font-medium">Commence par contrôler les exemples existants.</p>
             <p className="text-text-secondary text-sm mt-1">Valide le dataset, lis quelques réponses par catégorie, puis lance un entraînement court.</p>
           </div>
-          <Link href="/dataset" className="px-3 py-1.5 text-sm rounded-md font-medium bg-accent text-[#20140a] hover:bg-accent-strong transition-colors">
+          <Link href="/dataset" className="px-3 py-1.5 text-sm rounded-md font-medium bg-accent text-white hover:bg-accent-strong transition-colors">
             Ouvrir le Dataset
           </Link>
         </Card>

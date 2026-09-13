@@ -1,4 +1,4 @@
-"""Biscuits Focus API — dataset, training, evaluation and chat endpoints for the
+"""OpenAgent API — dataset, training, evaluation and chat endpoints for the
 Next.js management UI (web/). Not the model-serving API described in mission
 section 36 (POST /v1/chat etc.) — this one is the internal tool for managing
 the ML pipeline itself. Run with:
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     await run_in_threadpool(registry.shutdown)
 
 
-app = FastAPI(title="Biscuits Focus — Management API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="OpenAgent — Management API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,7 +64,7 @@ async def observability_and_audit(request, call_next):
     duration_ms = (time.perf_counter() - started) * 1000
     metrics.observe(request.method, response.status_code, duration_ms)
     response.headers["x-request-id"] = request_id
-    logging.getLogger("biscuits.http").info(json.dumps({"request_id": request_id, "method": request.method,
+    logging.getLogger("openagent.http").info(json.dumps({"request_id": request_id, "method": request.method,
         "path": request.url.path, "status": response.status_code, "duration_ms": round(duration_ms, 2)}))
     if request.method in {"POST", "PUT", "PATCH", "DELETE"} and response.status_code < 400 and not request.url.path.startswith("/api/enterprise"):
         try:

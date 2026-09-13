@@ -252,6 +252,20 @@ export type ProjectMember = {
   project_id: string; actor_id: string; email: string; name: string;
   role: "viewer" | "operator" | "reviewer" | "admin"; created_at: string;
 };
+export type Execution = {
+  id: string; project_id: string; actor_id: string; status: "running" | "completed" | "failed";
+  model: string; adapter?: string | null; rag_requested: number; rag_used: number;
+  prompt_chars: number; response_chars?: number | null; estimated_tokens?: number | null;
+  duration_ms?: number | null; started_at: string; finished_at?: string | null; error_code?: string | null;
+};
+export type Provider = {
+  id: string; project_id: string; name: string; type: "ollama" | "openai-compatible" | "anthropic-compatible";
+  base_url: string; model: string; api_key_env?: string | null; enabled: number; created_at: string;
+};
+export type ToolDefinition = { id: string; project_id: string; name: string; method: "GET" | "POST" | "MCP"; url: string; approval_required: number; timeout_seconds: number; max_response_bytes: number; enabled: number; created_at: string; connector_type?: "http" | "mcp"; connector_id?: string | null; action?: string | null; description?: string | null; input_schema?: Record<string, unknown> | null };
+export type Approval = { id: string; project_id: string; tool_id: string; tool_name: string; requester_id: string; status: "pending" | "processing" | "approved" | "denied" | "failed"; arguments: Record<string, unknown>; result?: Record<string, unknown> | null; created_at: string; decided_at?: string | null; decided_by?: string | null };
+export type ToolPolicy = { id: string; project_id: string; name: string; effect: "allow" | "deny" | "require_approval"; tool_id?: string | null; tool_name?: string | null; priority: number; enabled: number; created_at: string };
+export type McpServer = { id: string; project_id: string; name: string; url: string; api_key_env?: string | null; enabled: number; created_at: string };
 
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
@@ -340,6 +354,35 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ message, adapter, rag, system_prompt, history, user_context }),
       }),
+    stream: async (project: string, message: string, adapter: string | null, rag: boolean,
+                   history: { role: "user" | "assistant"; content: string }[] = [],
+                   user_context: Record<string, string> = {},
+                   onEvent: (event: string, payload: Record<string, unknown>) => void) => {
+      const res = await fetch(`${API_URL}${p(project)}/chat/stream`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, adapter, rag, history, user_context }),
+      });
+      if (!res.ok) throw new Error(`${res.status} chat stream: ${await res.text().catch(() => res.statusText)}`);
+      if (!res.body) throw new Error("Le navigateur ne fournit pas le flux de réponse");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done }).replaceAll("\r\n", "\n");
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const event = frame.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+          const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+          if (!data) continue;
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          onEvent(event, payload);
+          if (event === "error") throw new Error(String(payload.detail || "La génération a échoué"));
+        }
+        if (done) break;
+      }
+    },
   },
 
   rag: {
@@ -381,5 +424,21 @@ export const api = {
     updateMember: (project: string, member: Pick<ProjectMember, "actor_id" | "email" | "name" | "role">) => request<ProjectMember>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`, { method: "PUT", body: JSON.stringify(member) }),
     removeMember: (project: string, actorId: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(actorId)}`, { method: "DELETE" }),
     backupUrl: (project: string) => `${API_URL}/api/enterprise/projects/${encodeURIComponent(project)}/backup`,
+    executions: (project: string) => request<Execution[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/executions`),
+    providers: (project: string) => request<Provider[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers`),
+    updateProvider: (project: string, provider: Omit<Provider, "id" | "project_id" | "created_at" | "enabled"> & { enabled: boolean }) => request<Provider>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers`, { method: "PUT", body: JSON.stringify(provider) }),
+    removeProvider: (project: string, id: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    testProvider: (project: string, id: string) => request<{ ok: boolean; latency_ms: number; model: string }>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers/${encodeURIComponent(id)}/test`, { method: "POST" }),
+    tools: (project: string) => request<ToolDefinition[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools`),
+    updateTool: (project: string, tool: { name: string; method: "GET" | "POST"; url: string; approval_required: boolean; timeout_seconds: number; max_response_bytes: number }) => request<ToolDefinition>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools`, { method: "PUT", body: JSON.stringify(tool) }),
+    executeTool: (project: string, id: string, args: Record<string, unknown>) => request<Record<string, unknown>>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools/${encodeURIComponent(id)}/execute`, { method: "POST", body: JSON.stringify({ arguments: args }) }),
+    approvals: (project: string) => request<Approval[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/approvals`),
+    decideApproval: (project: string, id: string, decision: "approved" | "denied") => request<Approval>(`/api/enterprise/projects/${encodeURIComponent(project)}/approvals/${encodeURIComponent(id)}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
+    toolPolicies: (project: string) => request<ToolPolicy[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/tool-policies`),
+    updateToolPolicy: (project: string, policy: Pick<ToolPolicy, "name" | "effect" | "tool_id" | "priority"> & { enabled: boolean }) => request<ToolPolicy>(`/api/enterprise/projects/${encodeURIComponent(project)}/tool-policies`, { method: "PUT", body: JSON.stringify(policy) }),
+    removeToolPolicy: (project: string, id: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/tool-policies/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    mcpServers: (project: string) => request<McpServer[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers`),
+    updateMcpServer: (project: string, server: Pick<McpServer, "name" | "url" | "api_key_env"> & { enabled: boolean }) => request<McpServer>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers`, { method: "PUT", body: JSON.stringify(server) }),
+    syncMcpServer: (project: string, id: string) => request<{ discovered: number; imported: number; skipped: number; tools: ToolDefinition[] }>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers/${encodeURIComponent(id)}/sync`, { method: "POST" }),
   },
 };

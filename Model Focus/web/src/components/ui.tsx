@@ -38,7 +38,7 @@ export function Button({
   const base = "px-3 py-1.5 text-sm rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-medium";
   const variants: Record<string, string> = {
     default: "bg-surface-hover text-text-primary border border-border hover:border-border-strong",
-    accent: "bg-accent text-[#20140a] hover:bg-accent-strong",
+    accent: "bg-accent text-white hover:bg-accent-strong shadow-sm shadow-accent/10",
     danger: "bg-error-soft text-error border border-error/30 hover:bg-error/20",
     ghost: "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
   };
@@ -81,6 +81,9 @@ const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
   draft: { dot: "bg-text-muted", text: "text-text-muted" },
   evaluated: { dot: "bg-info", text: "text-info" },
   approved: { dot: "bg-accent", text: "text-accent" },
+  pending: { dot: "bg-info animate-pulse", text: "text-info" },
+  processing: { dot: "bg-info animate-pulse", text: "text-info" },
+  denied: { dot: "bg-error", text: "text-error" },
   production: { dot: "bg-success", text: "text-success" },
   archived: { dot: "bg-text-muted", text: "text-text-muted" },
 };
