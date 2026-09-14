@@ -23,6 +23,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
+from api.opportunities_seed import SEED_OPPORTUNITIES
+
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.getenv("BISCUITS_ENTERPRISE_DB", ROOT / ".enterprise" / "control-plane.db"))
 ROLES = {"viewer": 0, "operator": 1, "reviewer": 2, "admin": 3}
@@ -147,6 +149,40 @@ class EnterpriseStore:
                   enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
                   UNIQUE(project_id, name)
                 );
+                CREATE TABLE IF NOT EXISTS opportunities (
+                  id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                  customer_problem TEXT NOT NULL DEFAULT '', proposed_solution TEXT NOT NULL DEFAULT '',
+                  target_customer TEXT NOT NULL DEFAULT '', sector TEXT NOT NULL DEFAULT '',
+                  value_proposition TEXT NOT NULL DEFAULT '', technologies_json TEXT NOT NULL DEFAULT '[]',
+                  maturity TEXT NOT NULL DEFAULT '', dev_difficulty INTEGER NOT NULL DEFAULT 3,
+                  sales_difficulty INTEGER NOT NULL DEFAULT 3, competition TEXT NOT NULL DEFAULT '',
+                  differentiation TEXT NOT NULL DEFAULT '', business_model TEXT NOT NULL DEFAULT '',
+                  setup_cost REAL NOT NULL DEFAULT 0, monthly_cost REAL NOT NULL DEFAULT 0,
+                  setup_price REAL NOT NULL DEFAULT 0, monthly_price REAL NOT NULL DEFAULT 0,
+                  estimated_margin_pct REAL NOT NULL DEFAULT 0, recurring_revenue_potential REAL NOT NULL DEFAULT 0,
+                  risks_json TEXT NOT NULL DEFAULT '[]', regulatory_constraints TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'idee', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                  created_by TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS opportunity_scores (
+                  opportunity_id TEXT PRIMARY KEY REFERENCES opportunities(id) ON DELETE CASCADE,
+                  market INTEGER NOT NULL DEFAULT 0, profitability INTEGER NOT NULL DEFAULT 0,
+                  feasibility INTEGER NOT NULL DEFAULT 0, commercialization INTEGER NOT NULL DEFAULT 0,
+                  scalability INTEGER NOT NULL DEFAULT 0, retention INTEGER NOT NULL DEFAULT 0,
+                  risk INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS opportunity_kpis (
+                  id TEXT PRIMARY KEY, opportunity_id TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+                  category TEXT NOT NULL, name TEXT NOT NULL, unit TEXT NOT NULL DEFAULT '',
+                  current_value REAL, target_value REAL, previous_value REAL, measured_at TEXT,
+                  higher_is_better INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+                  UNIQUE(opportunity_id, name)
+                );
+                CREATE TABLE IF NOT EXISTS opportunity_ai_analyses (
+                  id TEXT PRIMARY KEY, opportunity_id TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+                  project_id TEXT NOT NULL, provider_id TEXT NOT NULL, result_json TEXT NOT NULL,
+                  recommended_score INTEGER, created_at TEXT NOT NULL, created_by TEXT NOT NULL
+                );
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tools)").fetchall()}
             for name, definition in {
@@ -164,7 +200,10 @@ class EnterpriseStore:
                 CREATE INDEX IF NOT EXISTS policies_project_target ON tool_policies(project_id, enabled, tool_id);
                 CREATE INDEX IF NOT EXISTS audit_project ON audit_events(project_id);
                 CREATE INDEX IF NOT EXISTS tools_project_connector ON tools(project_id, connector_id);
+                CREATE INDEX IF NOT EXISTS opportunity_kpis_opportunity ON opportunity_kpis(opportunity_id);
+                CREATE INDEX IF NOT EXISTS opportunity_analyses_opportunity ON opportunity_ai_analyses(opportunity_id, created_at DESC);
             """)
+        self._seed_opportunities_if_empty()
 
     @staticmethod
     def _rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -559,6 +598,171 @@ class EnterpriseStore:
         if not changed:
             raise HTTPException(409, "Cette demande n’est pas en cours d’exécution")
         return self.approval(project_id, approval_id)
+
+    OPPORTUNITY_SCORE_FIELDS = ("market", "profitability", "feasibility", "commercialization",
+                                "scalability", "retention", "risk")
+
+    def _opportunity_row(self, db, opportunity_id: str) -> dict[str, Any] | None:
+        row = db.execute("SELECT * FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["technologies"] = json.loads(result.pop("technologies_json"))
+        result["risks"] = json.loads(result.pop("risks_json"))
+        scores_row = db.execute("SELECT * FROM opportunity_scores WHERE opportunity_id=?", (opportunity_id,)).fetchone()
+        result["scores"] = {key: scores_row[key] for key in self.OPPORTUNITY_SCORE_FIELDS} if scores_row \
+            else {key: 0 for key in self.OPPORTUNITY_SCORE_FIELDS}
+        return result
+
+    def list_opportunities(self) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            ids = [row["id"] for row in db.execute("SELECT id FROM opportunities ORDER BY created_at").fetchall()]
+            return [self._opportunity_row(db, item_id) for item_id in ids]
+
+    def get_opportunity(self, opportunity_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            return self._opportunity_row(db, opportunity_id)
+
+    def create_opportunity(self, data: dict[str, Any], actor: Actor) -> dict[str, Any]:
+        opportunity_id = str(uuid.uuid4())
+        timestamp = now()
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO opportunities(id,name,description,customer_problem,proposed_solution,"
+                "target_customer,sector,value_proposition,technologies_json,maturity,dev_difficulty,"
+                "sales_difficulty,competition,differentiation,business_model,setup_cost,monthly_cost,"
+                "setup_price,monthly_price,estimated_margin_pct,recurring_revenue_potential,risks_json,"
+                "regulatory_constraints,status,created_at,updated_at,created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (opportunity_id, data["name"], data["description"], data["customer_problem"],
+                 data["proposed_solution"], data["target_customer"], data["sector"],
+                 data["value_proposition"], json.dumps(data["technologies"]), data["maturity"],
+                 data["dev_difficulty"], data["sales_difficulty"], data["competition"],
+                 data["differentiation"], data["business_model"], data["setup_cost"],
+                 data["monthly_cost"], data["setup_price"], data["monthly_price"],
+                 data["estimated_margin_pct"], data["recurring_revenue_potential"],
+                 json.dumps(data["risks"]), data["regulatory_constraints"], "idee",
+                 timestamp, timestamp, actor.id),
+            )
+            db.execute(
+                "INSERT INTO opportunity_scores(opportunity_id,market,profitability,feasibility,"
+                "commercialization,scalability,retention,risk,updated_at) VALUES (?,0,0,0,0,0,0,0,?)",
+                (opportunity_id, timestamp),
+            )
+            return self._opportunity_row(db, opportunity_id)
+
+    def update_opportunity(self, opportunity_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE opportunities SET name=?,description=?,customer_problem=?,proposed_solution=?,"
+                "target_customer=?,sector=?,value_proposition=?,technologies_json=?,maturity=?,"
+                "dev_difficulty=?,sales_difficulty=?,competition=?,differentiation=?,business_model=?,"
+                "setup_cost=?,monthly_cost=?,setup_price=?,monthly_price=?,estimated_margin_pct=?,"
+                "recurring_revenue_potential=?,risks_json=?,regulatory_constraints=?,updated_at=? WHERE id=?",
+                (data["name"], data["description"], data["customer_problem"], data["proposed_solution"],
+                 data["target_customer"], data["sector"], data["value_proposition"],
+                 json.dumps(data["technologies"]), data["maturity"], data["dev_difficulty"],
+                 data["sales_difficulty"], data["competition"], data["differentiation"],
+                 data["business_model"], data["setup_cost"], data["monthly_cost"], data["setup_price"],
+                 data["monthly_price"], data["estimated_margin_pct"], data["recurring_revenue_potential"],
+                 json.dumps(data["risks"]), data["regulatory_constraints"], now(), opportunity_id),
+            )
+            return self._opportunity_row(db, opportunity_id)
+
+    def update_opportunity_status(self, opportunity_id: str, status: str) -> dict[str, Any]:
+        with self._connect() as db:
+            db.execute("UPDATE opportunities SET status=?, updated_at=? WHERE id=?", (status, now(), opportunity_id))
+            return self._opportunity_row(db, opportunity_id)
+
+    def update_opportunity_scores(self, opportunity_id: str, scores: dict[str, int]) -> dict[str, Any]:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE opportunity_scores SET market=?,profitability=?,feasibility=?,commercialization=?,"
+                "scalability=?,retention=?,risk=?,updated_at=? WHERE opportunity_id=?",
+                (scores["market"], scores["profitability"], scores["feasibility"], scores["commercialization"],
+                 scores["scalability"], scores["retention"], scores["risk"], now(), opportunity_id),
+            )
+            return self._opportunity_row(db, opportunity_id)
+
+    def delete_opportunity(self, opportunity_id: str) -> bool:
+        with self._connect() as db:
+            return db.execute("DELETE FROM opportunities WHERE id=?", (opportunity_id,)).rowcount > 0
+
+    def list_kpis(self, opportunity_id: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            return self._rows(db.execute(
+                "SELECT * FROM opportunity_kpis WHERE opportunity_id=? ORDER BY category,name",
+                (opportunity_id,),
+            ).fetchall())
+
+    def upsert_kpi(self, opportunity_id: str, name: str, category: str, unit: str,
+                   current_value: float | None, target_value: float | None,
+                   higher_is_better: bool) -> dict[str, Any]:
+        with self._connect() as db:
+            existing = db.execute(
+                "SELECT * FROM opportunity_kpis WHERE opportunity_id=? AND name=?",
+                (opportunity_id, name),
+            ).fetchone()
+            if existing:
+                kpi_id = existing["id"]
+                db.execute(
+                    "UPDATE opportunity_kpis SET category=?,unit=?,current_value=?,previous_value=?,"
+                    "target_value=?,higher_is_better=?,measured_at=? WHERE id=?",
+                    (category, unit, current_value, existing["current_value"], target_value,
+                     int(higher_is_better), now(), kpi_id),
+                )
+            else:
+                kpi_id = str(uuid.uuid4())
+                db.execute(
+                    "INSERT INTO opportunity_kpis(id,opportunity_id,category,name,unit,current_value,"
+                    "target_value,previous_value,measured_at,higher_is_better,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (kpi_id, opportunity_id, category, name, unit, current_value, target_value,
+                     None, now(), int(higher_is_better), now()),
+                )
+            return dict(db.execute("SELECT * FROM opportunity_kpis WHERE id=?", (kpi_id,)).fetchone())
+
+    def save_ai_analysis(self, opportunity_id: str, project_id: str, provider_id: str,
+                         result: dict[str, Any], recommended_score: int | None,
+                         actor_id: str) -> dict[str, Any]:
+        analysis_id = str(uuid.uuid4())
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO opportunity_ai_analyses(id,opportunity_id,project_id,provider_id,"
+                "result_json,recommended_score,created_at,created_by) VALUES (?,?,?,?,?,?,?,?)",
+                (analysis_id, opportunity_id, project_id, provider_id, json.dumps(result),
+                 recommended_score, now(), actor_id),
+            )
+            row = dict(db.execute("SELECT * FROM opportunity_ai_analyses WHERE id=?", (analysis_id,)).fetchone())
+            row["result"] = json.loads(row.pop("result_json"))
+            return row
+
+    def list_ai_analyses(self, opportunity_id: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = self._rows(db.execute(
+                "SELECT * FROM opportunity_ai_analyses WHERE opportunity_id=? ORDER BY created_at DESC",
+                (opportunity_id,),
+            ).fetchall())
+        for row in rows:
+            row["result"] = json.loads(row.pop("result_json"))
+        return rows
+
+    def _seed_opportunities_if_empty(self) -> None:
+        with self._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0]
+        if count:
+            return
+        system_actor = Actor("system-seed", "seed@biscuits.invalid", "admin", "Amorçage système")
+        for seed in SEED_OPPORTUNITIES:
+            opportunity = self.create_opportunity(seed, system_actor)
+            self.update_opportunity_scores(opportunity["id"], seed["scores"])
+            self.update_opportunity_status(opportunity["id"], seed["status"])
+            for kpi in seed["kpis"]:
+                if kpi.get("previous_value") is not None:
+                    self.upsert_kpi(opportunity["id"], kpi["name"], kpi["category"], kpi["unit"],
+                                     kpi["previous_value"], kpi["target_value"], kpi["higher_is_better"])
+                self.upsert_kpi(opportunity["id"], kpi["name"], kpi["category"], kpi["unit"],
+                                 kpi["current_value"], kpi["target_value"], kpi["higher_is_better"])
 
 
 class Metrics:
