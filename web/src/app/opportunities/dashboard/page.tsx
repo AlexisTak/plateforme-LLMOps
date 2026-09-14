@@ -6,6 +6,7 @@ import { api, Opportunity, SCORE_LABELS } from "@/lib/api";
 import { BarChart } from "@/components/bar-chart";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
 import { clientsForTarget } from "@/lib/simulator";
+import { humanError } from "@/lib/errors";
 
 const MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
 
@@ -14,7 +15,7 @@ export default function OpportunitiesDashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.opportunities.dashboard().then(setOpportunities).catch((e) => setError(String(e)));
+    api.opportunities.dashboard().then(setOpportunities).catch((e) => setError(humanError(e)));
   }, []);
 
   if (error) return <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>;

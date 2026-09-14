@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, AuditEvent, EnterpriseContext, EnterpriseMetrics, ModelVersion, ProjectMember, ProjectQuota } from "@/lib/api";
 import { useProject } from "@/lib/project-context";
-import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { Button, Card, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
+import { humanError } from "@/lib/errors";
 
 const NEXT: Record<ModelVersion["status"], ModelVersion["status"] | null> = {
   draft: "evaluated", evaluated: "approved", approved: "production", production: "archived", archived: "production",
@@ -27,6 +28,7 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
   const [memberName, setMemberName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     const [c, m, v, a, q, team] = await Promise.all([
@@ -34,17 +36,18 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
       api.enterprise.audit(projectId), api.enterprise.quota(projectId), api.enterprise.members(projectId),
     ]);
     setContext(c); setMetrics(m); setVersions(v); setEvents(a); setQuota(q); setMembers(team); setError(null);
+    setLoaded(true);
   }, [projectId]);
 
   useEffect(() => {
     let active = true;
-    Promise.resolve().then(refresh).catch((e) => { if (active) setError(String(e)); });
+    Promise.resolve().then(refresh).catch((e) => { if (active) setError(humanError(e)); });
     return () => { active = false; };
   }, [refresh]);
 
   const act = async (work: () => Promise<unknown>) => {
     setBusy(true); setError(null);
-    try { await work(); await refresh(); } catch (e) { setError(String(e)); } finally { setBusy(false); }
+    try { await work(); await refresh(); } catch (e) { setError(humanError(e)); } finally { setBusy(false); }
   };
 
   return <div className="space-y-10">
@@ -52,10 +55,12 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
     {error ? <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card> : null}
 
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Metric label="Identité" value={context ? `${context.actor.name} · ${context.actor.role}` : "…"} />
-      <Metric label="Authentification" value={context?.auth_mode === "proxy" ? "SSO via proxy" : "Mode local"} />
-      <Metric label="Requêtes · p95" value={metrics ? `${metrics.requests_total ?? 0} · ${metrics.latency_p95_ms} ms` : "…"} />
-      <Metric label="Jobs" value={metrics ? `${metrics.jobs_running} actif · ${metrics.jobs_failed} échoué` : "…"} />
+      {!loaded ? <><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></> : <>
+        <Metric label="Identité" value={context ? `${context.actor.name} · ${context.actor.role}` : "…"} />
+        <Metric label="Authentification" value={context?.auth_mode === "proxy" ? "SSO via proxy" : "Mode local"} />
+        <Metric label="Requêtes · p95" value={metrics ? `${metrics.requests_total ?? 0} · ${metrics.latency_p95_ms} ms` : "…"} />
+        <Metric label="Jobs" value={metrics ? `${metrics.jobs_running} actif · ${metrics.jobs_failed} échoué` : "…"} />
+      </>}
     </div>
 
     <section>
@@ -72,9 +77,9 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
       </Card>
       <div className="grid gap-2 md:grid-cols-2">{members.map((member) => <Card key={member.actor_id} className="flex items-center justify-between gap-3">
         <div><p className="text-sm text-text-primary">{member.name}</p><p className="text-xs text-text-muted">{member.email}</p></div>
-        <select value={member.role} disabled={busy} onChange={(e) => act(() => api.enterprise.updateMember(projectId, { actor_id: member.actor_id, email: member.email, name: member.name, role: e.target.value as ProjectMember["role"] }))} className="bg-bg border border-border rounded-md px-2 py-1 text-xs">
+        <Select value={member.role} disabled={busy} className="text-xs" onChange={(v) => act(() => api.enterprise.updateMember(projectId, { actor_id: member.actor_id, email: member.email, name: member.name, role: v as ProjectMember["role"] }))}>
           {(["viewer", "operator", "reviewer", "admin"] as const).map((role) => <option key={role}>{role}</option>)}
-        </select>
+        </Select>
       </Card>)}</div>
     </section>
 

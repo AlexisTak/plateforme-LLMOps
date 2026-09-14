@@ -8,7 +8,9 @@ import {
   Project, Provider, SCORE_LABELS,
 } from "@/lib/api";
 import { simulate, SimulatorInput } from "@/lib/simulator";
-import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle } from "@/components/ui";
+import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle, Select, Skeleton } from "@/components/ui";
+import { useAction } from "@/lib/use-action";
+import { humanError } from "@/lib/errors";
 
 const STATUSES: Opportunity["status"][] = [
   "idee", "analyse", "validation", "poc", "pilote", "commercialisation", "production", "abandonnee",
@@ -44,7 +46,6 @@ export default function OpportunityDetailPage() {
   const [analysisProviderId, setAnalysisProviderId] = useState("");
   const [simInput, setSimInput] = useState<SimulatorInput | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [item, kpiList, analysisList, projectList] = await Promise.all([
@@ -62,34 +63,41 @@ export default function OpportunityDetailPage() {
     });
   }, [id]);
 
-  useEffect(() => { refresh().catch((e) => setError(String(e))); }, [refresh]);
+  useEffect(() => { refresh().catch((e) => setError(humanError(e))); }, [refresh]);
 
   useEffect(() => {
     if (!analysisProjectId) { setProviders([]); return; }
     api.enterprise.providers(analysisProjectId).then((list) => setProviders(list.filter((p) => p.enabled)))
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(humanError(e)));
   }, [analysisProjectId]);
 
-  const act = async (work: () => Promise<unknown>) => {
-    setBusy(true); setError(null);
-    try { await work(); await refresh(); } catch (e) { setError(String(e)); } finally { setBusy(false); }
-  };
+  const updateStatusAction = useAction((next: Opportunity["status"]) => api.opportunities.updateStatus(id, next), { success: "Statut mis à jour." });
+  const saveFieldsAction = useAction((value: OpportunityFields) => api.opportunities.update(id, value), { success: "Fiche enregistrée." });
+  const saveScoresAction = useAction((value: OpportunityScores) => api.opportunities.updateScores(id, value), { success: "Score enregistré." });
+  const upsertKpiAction = useAction(
+    (kpi: Parameters<typeof api.opportunities.upsertKpi>[1]) => api.opportunities.upsertKpi(id, kpi),
+    { success: "KPI mesuré." },
+  );
+  const analyzeAction = useAction(
+    (projectId: string, providerId: string) => api.opportunities.analyze(id, projectId, providerId),
+    { success: "Analyse IA générée." },
+  );
+  const busy = updateStatusAction.busy || saveFieldsAction.busy || saveScoresAction.busy || upsertKpiAction.busy || analyzeAction.busy;
 
   if (error && (!fields || !scores)) {
     return <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>;
   }
-  if (!fields || !scores) return <p>Chargement…</p>;
+  if (!fields || !scores) return <div className="space-y-4"><Skeleton className="h-8 w-1/3" /><Skeleton className="h-48" /><Skeleton className="h-32" /></div>;
 
   const total = SCORE_FIELDS.reduce((sum, f) => sum + scores[f.key], 0);
   const label = SCORE_LABELS[labelForTotal(total)];
 
   return <div className="space-y-8">
     <PageHeader title={fields.name} description={fields.value_proposition}
-      action={<select value={status} disabled={busy}
-        onChange={(e) => act(() => api.opportunities.updateStatus(id, e.target.value as Opportunity["status"]))}
-        className="bg-bg border border-border rounded-md px-2 py-1 text-xs">
+      action={<Select value={status} disabled={busy} className="text-xs"
+        onChange={(v) => updateStatusAction.run(v as Opportunity["status"]).then((r) => r && setStatus(v as Opportunity["status"]))}>
         {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-      </select>} />
+      </Select>} />
     {error ? <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card> : null}
 
     <section>
@@ -107,7 +115,7 @@ export default function OpportunityDetailPage() {
         <Field label="Coût mensuel (€)"><NumberField value={fields.monthly_cost} onChange={(v) => setFields({ ...fields, monthly_cost: v })} /></Field>
         <Field label="Prix de setup (€)"><NumberField value={fields.setup_price} onChange={(v) => setFields({ ...fields, setup_price: v })} /></Field>
         <Field label="Abonnement mensuel (€)"><NumberField value={fields.monthly_price} onChange={(v) => setFields({ ...fields, monthly_price: v })} /></Field>
-        <div className="md:col-span-2"><Button variant="accent" disabled={busy} onClick={() => act(() => api.opportunities.update(id, fields))}>Enregistrer la fiche</Button></div>
+        <div className="md:col-span-2"><Button variant="accent" disabled={busy} onClick={() => saveFieldsAction.run(fields)}>Enregistrer la fiche</Button></div>
       </Card>
     </section>
 
@@ -120,7 +128,7 @@ export default function OpportunityDetailPage() {
             onChange={(e) => setScores({ ...scores, [f.key]: Math.max(0, Math.min(f.max, Number(e.target.value))) })}
             className="mt-1 w-full bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary" />
         </label>)}
-        <div className="lg:col-span-4"><Button variant="accent" disabled={busy} onClick={() => act(() => api.opportunities.updateScores(id, scores))}>Enregistrer le score</Button></div>
+        <div className="lg:col-span-4"><Button variant="accent" disabled={busy} onClick={() => saveScoresAction.run(scores)}>Enregistrer le score</Button></div>
       </Card>
     </section>
 
@@ -128,10 +136,10 @@ export default function OpportunityDetailPage() {
       <SectionTitle>KPI</SectionTitle>
       {kpis.length === 0 ? <EmptyState>Aucun KPI défini.</EmptyState> : <div className="space-y-2">
         {kpis.map((kpi) => <KpiRow key={kpi.id} kpi={kpi} busy={busy}
-          onSave={(current, target) => act(() => api.opportunities.upsertKpi(id, {
+          onSave={(current, target) => upsertKpiAction.run({
             name: kpi.name, category: kpi.category, unit: kpi.unit,
             current_value: current, target_value: target, higher_is_better: !!kpi.higher_is_better,
-          }))} />)}
+          })} />)}
       </div>}
     </section>
 
@@ -144,21 +152,19 @@ export default function OpportunityDetailPage() {
       <SectionTitle>Analyse IA</SectionTitle>
       <Card className="flex flex-wrap gap-2 items-end mb-3">
         <label className="text-xs text-text-muted">Projet
-          <select value={analysisProjectId} onChange={(e) => setAnalysisProjectId(e.target.value)}
-            className="mt-1 block bg-bg border border-border rounded-md px-2 py-1.5 text-sm">
+          <Select value={analysisProjectId} onChange={setAnalysisProjectId} className="mt-1 block">
             <option value="">—</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="text-xs text-text-muted">Fournisseur
-          <select value={analysisProviderId} onChange={(e) => setAnalysisProviderId(e.target.value)}
-            className="mt-1 block bg-bg border border-border rounded-md px-2 py-1.5 text-sm">
+          <Select value={analysisProviderId} onChange={setAnalysisProviderId} className="mt-1 block">
             <option value="">—</option>
             {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          </Select>
         </label>
         <Button variant="accent" disabled={busy || !analysisProjectId || !analysisProviderId}
-          onClick={() => act(() => api.opportunities.analyze(id, analysisProjectId, analysisProviderId))}>
+          onClick={() => analyzeAction.run(analysisProjectId, analysisProviderId).then((a) => a && refresh())}>
           Analyser avec l’IA
         </Button>
       </Card>

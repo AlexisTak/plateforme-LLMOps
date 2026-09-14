@@ -4,42 +4,44 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, Opportunity, SCORE_LABELS } from "@/lib/api";
-import { Button, Card, EmptyState, Input, PageHeader, StatusBadge } from "@/components/ui";
+import { Button, Card, EmptyState, Input, PageHeader, Skeleton, StatusBadge } from "@/components/ui";
+import { useAction } from "@/lib/use-action";
 
 export default function OpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
-    setOpportunities(await api.opportunities.list());
+    const next = await api.opportunities.list();
+    setOpportunities(next);
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
-    let active = true;
-    refresh().catch((e) => { if (active) setError(String(e)); });
-    return () => { active = false; };
+    refresh().catch(() => setLoaded(true));
   }, [refresh]);
 
+  const createAction = useAction((name: string) => api.opportunities.create({ name }), {
+    success: (item) => `${item.name} créée.`,
+  });
   const create = async () => {
-    setBusy(true); setError(null);
-    try {
-      await api.opportunities.create({ name: name.trim() });
+    const created = await createAction.run(name.trim());
+    if (created) {
       setName("");
       await refresh();
-    } catch (e) { setError(String(e)); } finally { setBusy(false); }
+    }
   };
 
   return <div className="space-y-6">
-    <PageHeader title="Opportunités Business IA" description="Cataloguer, scorer et suivre les offres IA de l'ESN."
+    <PageHeader title="Opportunités Business IA" description="Cataloguer, scorer et suivre les offres IA."
       action={<Link href="/opportunities/dashboard" className="px-3 py-1.5 text-sm rounded-md bg-surface-hover text-text-primary border border-border">Voir le dashboard</Link>} />
-    {error ? <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card> : null}
+    {createAction.error ? <Card className="border-error/30 bg-error-soft text-error text-sm">{createAction.error}</Card> : null}
     <Card className="flex flex-wrap gap-2">
       <Input value={name} onChange={setName} placeholder="Nom de la nouvelle opportunité" className="flex-1 min-w-56" />
-      <Button variant="accent" disabled={busy || !name.trim()} onClick={create}>Créer</Button>
+      <Button variant="accent" disabled={createAction.busy || !name.trim()} onClick={create}>Créer</Button>
     </Card>
-    {opportunities.length === 0 ? <EmptyState>Aucune opportunité pour l'instant.</EmptyState> : <div className="grid gap-3 md:grid-cols-2">
+    {!loaded ? <div className="grid gap-3 md:grid-cols-2"><Skeleton className="h-28" /><Skeleton className="h-28" /></div> : opportunities.length === 0 ? <EmptyState>Aucune opportunité pour l'instant.</EmptyState> : <div className="grid gap-3 md:grid-cols-2">
       {opportunities.map((item) => {
         const label = SCORE_LABELS[item.score.label];
         return <Link key={item.id} href={`/opportunities/${item.id}`}>
