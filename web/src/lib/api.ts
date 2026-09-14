@@ -17,7 +17,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     let detail = text;
     try {
       const parsed = JSON.parse(text);
-      detail = parsed.detail || text;
+      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
     } catch {
       // not JSON, use raw text
     }
