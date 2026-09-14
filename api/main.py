@@ -20,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from api.jobs import registry
 
 from api.enterprise import actor_from_request, metrics, require_role, store
-from api.routes import chat, dataset, enterprise, evaluation, experiments, jobs, projects, rag, system, training
+from api.routes import chat, dataset, enterprise, evaluation, experiments, jobs, opportunities, projects, rag, system, training
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -86,6 +86,7 @@ app.include_router(rag.router)
 app.include_router(system.router)
 app.include_router(projects.router)
 app.include_router(enterprise.router)
+app.include_router(opportunities.router)
 
 
 @app.get("/api/health")
