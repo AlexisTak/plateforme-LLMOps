@@ -10,6 +10,7 @@ const PRIMARY = [
   { href: "/training", label: "Training" },
   { href: "/benchmarks", label: "Benchmarks" },
   { href: "/chat", label: "Chat" },
+  { href: "/opportunities", label: "Opportunités" },
 ];
 
 const MANAGEMENT = [
