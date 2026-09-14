@@ -2,7 +2,7 @@
 
 import { NavLink } from "@/components/nav-link";
 
-const LINKS = [
+export const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/dataset", label: "Dataset" },
   { href: "/training", label: "Training" },
