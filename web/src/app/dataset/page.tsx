@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetExample, Message, ValidationResult, DatasetStats } from "@/lib/api";
-import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle } from "@/components/ui";
+import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, SectionTitle, Skeleton, Textarea } from "@/components/ui";
 import { BarChart } from "@/components/bar-chart";
 import { useProject } from "@/lib/project-context";
+import { useAction } from "@/lib/use-action";
+import { humanError } from "@/lib/errors";
 
 const ROLES: Message["role"][] = ["user", "assistant"];
 
@@ -15,17 +17,22 @@ export default function DatasetPage() {
   const [examples, setExamples] = useState<DatasetExample[]>([]);
   const [stats, setStats] = useState<DatasetStats | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [busy, setBusy] = useState(false);
   const [prepareVersion, setPrepareVersion] = useState("dataset-v0.4");
   const [prepareResult, setPrepareResult] = useState<string | null>(null);
   const [dedupResult, setDedupResult] = useState<string | null>(null);
+  const [pendingDedup, setPendingDedup] = useState<{ count: number; sample: string; more: string; total: number } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DatasetExample | null>(null);
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
   const [query, setQuery] = useState("");
   const [addingNew, setAddingNew] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(true);
 
   const refreshCategories = () => {
     if (!projectId) return;
-    api.dataset.categories(projectId).then(setCategories);
+    api.dataset.categories(projectId).then((next) => {
+      setCategories(next);
+      setLoadingCategories(false);
+    });
     api.dataset.stats(projectId).then(setStats);
   };
 
@@ -43,57 +50,56 @@ export default function DatasetPage() {
     if (selected && projectId) api.dataset.list(projectId, selected).then(setExamples);
   }, [selected, projectId]);
 
+  const validateAction = useAction(() => api.dataset.validate(projectId!));
   const runValidate = async () => {
     if (!projectId) return;
-    setBusy(true);
-    try {
-      setValidation(await api.dataset.validate(projectId));
-    } finally {
-      setBusy(false);
-    }
+    const res = await validateAction.run();
+    if (res) setValidation(res);
   };
 
+  const prepareAction = useAction((version: string) => api.dataset.prepare(projectId!, version));
   const runPrepare = async () => {
     if (!projectId) return;
-    setBusy(true);
     setPrepareResult(null);
-    try {
-      const res = await api.dataset.prepare(projectId, prepareVersion);
+    const res = await prepareAction.run(prepareVersion);
+    if (res) {
       setPrepareResult(`${res.version} — train ${res.train} · validation ${res.validation} · test ${res.test}`);
       refreshVersion();
-    } finally {
-      setBusy(false);
     }
   };
 
+  const deduplicateAction = useAction((dryRun: boolean) => api.dataset.deduplicate(projectId!, dryRun));
   const runDeduplicate = async () => {
     if (!projectId) return;
-    setBusy(true);
     setDedupResult(null);
-    try {
-      const preview = await api.dataset.deduplicate(projectId, true);
-      if (preview.duplicates.length === 0) {
-        setDedupResult("Aucun doublon exact trouvé.");
-        return;
-      }
-      const sample = preview.duplicates.slice(0, 10).map((d) => `${d.file}:${d.line}`).join(", ");
-      const more = preview.duplicates.length > 10 ? ` (+${preview.duplicates.length - 10} autre(s))` : "";
-      if (!confirm(`${preview.duplicates.length} doublon(s) exact(s) trouvé(s) sur ${preview.total_before} exemples :\n${sample}${more}\n\nLes supprimer ?`)) {
-        setDedupResult(`${preview.duplicates.length} doublon(s) détecté(s), non supprimé(s) (annulé).`);
-        return;
-      }
-      const res = await api.dataset.deduplicate(projectId, false);
+    const preview = await deduplicateAction.run(true);
+    if (!preview) return;
+    if (preview.duplicates.length === 0) {
+      setDedupResult("Aucun doublon exact trouvé.");
+      return;
+    }
+    const sample = preview.duplicates.slice(0, 10).map((d) => `${d.file}:${d.line}`).join(", ");
+    const more = preview.duplicates.length > 10 ? ` (+${preview.duplicates.length - 10} autre(s))` : "";
+    setPendingDedup({ count: preview.duplicates.length, sample, more, total: preview.total_before });
+  };
+  const confirmDeduplicate = async () => {
+    if (!pendingDedup || !projectId) return;
+    setPendingDedup(null);
+    const res = await deduplicateAction.run(false);
+    if (res) {
       setDedupResult(`${res.removed} doublon(s) exact(s) supprimé(s) sur ${res.total_before} exemples.`);
       refreshCategories();
       if (selected) api.dataset.list(projectId, selected).then(setExamples);
-    } finally {
-      setBusy(false);
     }
   };
 
-  const deleteExample = async (ex: DatasetExample) => {
-    if (!selected || !projectId) return;
-    if (!confirm(`Supprimer l'exemple #${ex.index} de ${ex.file} ?`)) return;
+  const anyBusy = validateAction.busy || prepareAction.busy || deduplicateAction.busy;
+
+  const deleteExample = (ex: DatasetExample) => setPendingDelete(ex);
+  const confirmDeleteExample = async () => {
+    if (!selected || !projectId || !pendingDelete) return;
+    const ex = pendingDelete;
+    setPendingDelete(null);
     await api.dataset.remove(projectId, selected, ex.id);
     api.dataset.list(projectId, selected).then(setExamples);
     refreshCategories();
@@ -127,10 +133,10 @@ export default function DatasetPage() {
         description="Parcourir, éditer et ajouter des exemples par catégorie, valider le format, dédupliquer, reconstruire les splits."
         action={
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={runDeduplicate} disabled={busy}>
+            <Button variant="ghost" onClick={runDeduplicate} disabled={anyBusy}>
               Dédupliquer
             </Button>
-            <Button onClick={runValidate} disabled={busy}>
+            <Button onClick={runValidate} disabled={anyBusy}>
               Valider le dataset
             </Button>
           </div>
@@ -233,7 +239,13 @@ export default function DatasetPage() {
 
       <div className="grid grid-cols-[220px_1fr] gap-6">
         <div className="space-y-1">
-          {categories.map((cat) => (
+          {loadingCategories ? (
+            <>
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+            </>
+          ) : categories.map((cat) => (
             <button
               key={cat.category}
               onClick={() => {
@@ -287,12 +299,31 @@ export default function DatasetPage() {
         <p className="text-text-secondary text-sm mb-3">Régénère train / validation / test (80/10/10) à partir de tout le contenu de <code className="font-mono text-text-primary">datasets/</code>.</p>
         <div className="flex items-center gap-2">
           <Input value={prepareVersion} onChange={setPrepareVersion} placeholder="dataset-v0.4" className="w-48" />
-          <Button onClick={runPrepare} disabled={busy}>
+          <Button onClick={runPrepare} disabled={anyBusy}>
             Reconstruire
           </Button>
           {prepareResult && <span className="text-sm text-text-secondary font-mono">{prepareResult}</span>}
         </div>
       </section>
+
+      <ConfirmDialog
+        open={!!pendingDedup}
+        title="Supprimer les doublons exacts ?"
+        description={pendingDedup ? `${pendingDedup.count} doublon(s) exact(s) trouvé(s) sur ${pendingDedup.total} exemples : ${pendingDedup.sample}${pendingDedup.more}` : undefined}
+        confirmLabel="Supprimer"
+        danger
+        onConfirm={confirmDeduplicate}
+        onCancel={() => setPendingDedup(null)}
+      />
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Supprimer cet exemple ?"
+        description={pendingDelete ? `Exemple #${pendingDelete.index} de ${pendingDelete.file}` : undefined}
+        confirmLabel="Supprimer"
+        danger
+        onConfirm={confirmDeleteExample}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
@@ -344,15 +375,15 @@ function ExampleCard({
         {draft.map((m, i) => (
           <div key={i} className="flex gap-3 text-sm items-start">
             <span className="text-text-muted uppercase text-[11px] tracking-wide w-16 shrink-0 pt-1.5 font-medium">{m.role}</span>
-            <textarea
+            <Textarea
               value={m.content}
-              onChange={(e) => {
+              onChange={(v) => {
                 const next = [...draft];
-                next[i] = { ...next[i], content: e.target.value };
+                next[i] = { ...next[i], content: v };
                 setDraft(next);
               }}
               rows={3}
-              className="flex-1 bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors font-mono"
+              className="flex-1 font-mono"
             />
           </div>
         ))}
@@ -410,7 +441,7 @@ function NewExampleCard({
         { role: "assistant", content: assistantContent.trim() },
       ]);
     } catch (e) {
-      setError(String(e));
+      setError(humanError(e));
     } finally {
       setSaving(false);
     }
@@ -424,12 +455,12 @@ function NewExampleCard({
       {ROLES.map((role) => (
         <div key={role} className="flex gap-3 text-sm items-start">
           <span className="text-text-muted uppercase text-[11px] tracking-wide w-16 shrink-0 pt-1.5 font-medium">{role}</span>
-          <textarea
+          <Textarea
             value={role === "user" ? userContent : assistantContent}
-            onChange={(e) => (role === "user" ? setUserContent(e.target.value) : setAssistantContent(e.target.value))}
+            onChange={role === "user" ? setUserContent : setAssistantContent}
             rows={3}
             placeholder={role === "user" ? "Message utilisateur…" : 'Réponse assistant… (JSON si structuré, ex: {"intent": "..."})'}
-            className="flex-1 bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors font-mono"
+            className="flex-1 font-mono"
           />
         </div>
       ))}

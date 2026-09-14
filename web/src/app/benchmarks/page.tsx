@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, BenchmarkCase, EvalSummaryMetric, EvaluationReport, JobStatus, ModelPreflight } from "@/lib/api";
 import { DonutChart } from "@/components/donut-chart";
-import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, SectionTitle, Skeleton, StatusBadge, Textarea } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
 import { ModelPreflightCard } from "@/components/model-preflight-card";
+import { useAction } from "@/lib/use-action";
+import { humanError } from "@/lib/errors";
 
 const legacyCount = (passed: number | undefined, percentage: number | null | undefined, total: number) =>
   passed ?? Math.round(((percentage ?? 0) / 100) * total);
@@ -25,6 +27,8 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
   const [preflight, setPreflight] = useState<ModelPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(true);
   const [editing, setEditing] = useState<BenchmarkCase | "new" | null>(null);
+  const [casesLoaded, setCasesLoaded] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<BenchmarkCase | null>(null);
 
   const checkModel = useCallback(() => {
     setPreflightLoading(true);
@@ -40,10 +44,11 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
       setCases(nextCases);
       setSummary(nextSummary);
       setReport(nextReport);
+      setCasesLoaded(true);
     }), [projectId]);
 
   useEffect(() => {
-    refresh().catch((e) => setError(String(e)));
+    refresh().catch((e) => setError(humanError(e)));
   }, [refresh]);
 
   useEffect(() => {
@@ -58,9 +63,9 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
         setJob(next);
         if (next.status !== "running") {
           setRunning(false);
-          refresh().catch((e) => setError(String(e)));
+          refresh().catch((e) => setError(humanError(e)));
         }
-      }).catch((e) => { setRunning(false); setError(String(e)); });
+      }).catch((e) => { setRunning(false); setError(humanError(e)); });
     }, 3000);
     return () => clearInterval(interval);
   }, [job, refresh]);
@@ -72,7 +77,7 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
       setJob(await api.evaluation.run(projectId));
     } catch (e) {
       setRunning(false);
-      setError(String(e));
+      setError(humanError(e));
     }
   };
 
@@ -84,19 +89,22 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
       setEditing(null);
       await refresh();
     } catch (e) {
-      setError(String(e));
+      setError(humanError(e));
       throw e;
     }
   };
 
-  const removeCase = async (item: BenchmarkCase) => {
-    if (!confirm(`Supprimer définitivement le cas « ${item.id} » ?`)) return;
-    setError(null);
-    try {
-      await api.evaluation.removeCase(projectId, item.id);
+  const removeCaseAction = useAction((item: BenchmarkCase) => api.evaluation.removeCase(projectId, item.id));
+  const removeCase = (item: BenchmarkCase) => setPendingRemove(item);
+  const confirmRemoveCase = async () => {
+    if (!pendingRemove) return;
+    const item = pendingRemove;
+    setPendingRemove(null);
+    const res = await removeCaseAction.run(item);
+    if (res !== undefined) {
       if (editing !== "new" && editing?.id === item.id) setEditing(null);
       await refresh();
-    } catch (e) { setError(String(e)); }
+    }
   };
 
   const metrics = summary ? Object.entries(summary) : [];
@@ -107,6 +115,16 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
         title="Benchmarks"
         description="Cas de test comportementaux, résultats automatiques et critères de revue humaine."
         action={<Button variant="accent" onClick={run} disabled={running || !preflight?.ready}>{running ? "Évaluation en cours…" : "Lancer le benchmark"}</Button>}
+      />
+
+      <ConfirmDialog
+        open={!!pendingRemove}
+        title="Supprimer ce cas ?"
+        description={pendingRemove ? `Supprimer définitivement le cas « ${pendingRemove.id} ».` : undefined}
+        confirmLabel="Supprimer"
+        danger
+        onConfirm={confirmRemoveCase}
+        onCancel={() => setPendingRemove(null)}
       />
 
       <ModelPreflightCard result={preflight} loading={preflightLoading} onRetry={checkModel} />
@@ -123,7 +141,12 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
           <Button variant="accent" onClick={() => setEditing(editing === "new" ? null : "new")}>{editing === "new" ? "Annuler" : "+ Nouveau cas"}</Button>
         </div>
         {editing ? <BenchmarkCaseEditor key={editing === "new" ? "new" : editing.id} initial={editing === "new" ? undefined : editing} onSave={saveCase} onCancel={() => setEditing(null)} /> : null}
-        {cases.length === 0 ? <EmptyState>Aucun cas de benchmark.</EmptyState> : (
+        {!casesLoaded ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
+          </div>
+        ) : cases.length === 0 ? <EmptyState>Aucun cas de benchmark.</EmptyState> : (
           <div className="grid gap-3 md:grid-cols-2">
             {cases.map((item) => (
               <details key={item.id} className="group bg-surface border border-border rounded-lg p-4">
@@ -233,7 +256,7 @@ function BenchmarkCaseEditor({ initial, onSave, onCancel }: { initial?: Benchmar
       <label className="text-xs text-text-muted">Identifiant<Input value={id} onChange={setId} placeholder="ex. support_refund" className="w-full mt-1" /></label>
       <label className="text-xs text-text-muted">Catégorie<Input value={category} onChange={setCategory} placeholder="quality" className="w-full mt-1" /></label>
     </div>
-    <label className="block text-xs text-text-muted">Question envoyée au modèle<textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} className="w-full mt-1 bg-bg border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" /></label>
+    <label className="block text-xs text-text-muted">Question envoyée au modèle<Textarea value={prompt} onChange={setPrompt} rows={4} className="mt-1" /></label>
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-xs text-text-muted">Longueur maximale<input type="number" min={1} max={100000} value={maxChars} onChange={(e) => setMaxChars(Number(e.target.value))} className="w-full mt-1 bg-bg border border-border rounded-md px-3 py-1.5 text-sm" /></label>
       <label className="text-xs text-text-muted">Clés JSON attendues<Input value={expectedKeys} onChange={setExpectedKeys} placeholder="answer, confidence" className="w-full mt-1" /></label>
@@ -242,7 +265,7 @@ function BenchmarkCaseEditor({ initial, onSave, onCancel }: { initial?: Benchmar
       <label className="flex items-center gap-2"><input type="checkbox" checked={expectPlainText} onChange={(e) => setExpectPlainText(e.target.checked)} /> Texte naturel attendu</label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={expectJson} onChange={(e) => setExpectJson(e.target.checked)} /> JSON attendu</label>
     </div>
-    <label className="block text-xs text-text-muted">Critères de revue humaine — un par ligne<textarea value={review} onChange={(e) => setReview(e.target.value)} rows={3} className="w-full mt-1 bg-bg border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" /></label>
+    <label className="block text-xs text-text-muted">Critères de revue humaine — un par ligne<Textarea value={review} onChange={setReview} rows={3} className="mt-1" /></label>
     <div className="flex justify-end gap-2"><Button onClick={onCancel}>Annuler</Button><Button variant="accent" disabled={saving || !id.trim() || !prompt.trim()} onClick={save}>{saving ? "Enregistrement…" : "Enregistrer"}</Button></div>
   </Card>;
 }

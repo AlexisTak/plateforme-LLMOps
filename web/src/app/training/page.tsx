@@ -1,10 +1,11 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, JobStatus, ModelPreflight, Project, TrainingConfigSummary, TrainingMetricPoint } from "@/lib/api";
-import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { Button, Card, EmptyState, Field, Input, PageHeader, Pill, SectionTitle, Select, Skeleton, StatusBadge } from "@/components/ui";
 import { LineChart } from "@/components/line-chart";
+import { useAction } from "@/lib/use-action";
 import { useProject } from "@/lib/project-context";
 import { ModelPreflightCard } from "@/components/model-preflight-card";
 
@@ -38,9 +39,9 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
   const [newConfigBatchSize, setNewConfigBatchSize] = useState(1);
   const [newConfigGradAccum, setNewConfigGradAccum] = useState(8);
   const [newConfigWarmup, setNewConfigWarmup] = useState(5);
-  const [newConfigError, setNewConfigError] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<ModelPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(true);
+  const [configsLoaded, setConfigsLoaded] = useState(false);
 
   const checkModel = () => {
     if (!project?.base_model) return;
@@ -55,6 +56,7 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
     if (!projectId) return;
     api.training.configs(projectId).then((next) => {
       setConfigs(next);
+      setConfigsLoaded(true);
       if (!initialized.current && next.length) {
         initialized.current = true;
         setPipelineConfig(next[0].filename);
@@ -103,29 +105,30 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
     refresh();
   };
 
+  const createConfigAction = useAction(
+    (params: Parameters<typeof api.training.createConfig>[1]) => api.training.createConfig(projectId, params),
+    { success: (cfg) => `Config ${cfg.filename} créée.` },
+  );
   const createConfig = async () => {
-    setNewConfigError(null);
     if (!newConfigName.trim() || !newConfigDatasetVersion.trim() || !projectId) return;
-    try {
-      await api.training.createConfig(projectId, {
-        name: newConfigName.trim(),
-        notes: newConfigNotes.trim() || undefined,
-        dataset_version: newConfigDatasetVersion.trim(),
-        lora_r: newConfigR,
-        lora_alpha: newConfigAlpha === "" ? undefined : newConfigAlpha,
-        lora_dropout: newConfigDropout,
-        epochs: newConfigEpochs,
-        learning_rate: newConfigLr,
-        batch_size: newConfigBatchSize,
-        gradient_accumulation_steps: newConfigGradAccum,
-        warmup_steps: newConfigWarmup,
-      });
+    const created = await createConfigAction.run({
+      name: newConfigName.trim(),
+      notes: newConfigNotes.trim() || undefined,
+      dataset_version: newConfigDatasetVersion.trim(),
+      lora_r: newConfigR,
+      lora_alpha: newConfigAlpha === "" ? undefined : newConfigAlpha,
+      lora_dropout: newConfigDropout,
+      epochs: newConfigEpochs,
+      learning_rate: newConfigLr,
+      batch_size: newConfigBatchSize,
+      gradient_accumulation_steps: newConfigGradAccum,
+      warmup_steps: newConfigWarmup,
+    });
+    if (created) {
       setNewConfigName("");
       setNewConfigNotes("");
       setNewConfigOpen(false);
       refresh();
-    } catch (e) {
-      setNewConfigError(String(e));
     }
   };
 
@@ -165,17 +168,13 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
             Porte uniquement sur <span className="font-mono text-text-primary">datasets/</span> (comportement) — jamais sur les documents RAG.
           </p>
           <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={pipelineConfig}
-              onChange={(e) => setPipelineConfig(e.target.value)}
-              className="bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
-            >
+            <Select value={pipelineConfig} onChange={setPipelineConfig}>
               {configs.map((cfg) => (
                 <option key={cfg.filename} value={cfg.filename}>
                   {cfg.filename} (r={cfg.lora_r})
                 </option>
               ))}
-            </select>
+            </Select>
             <Input value={pipelineVersion} onChange={setPipelineVersion} placeholder="dataset-v0.4" className="w-40" />
             <label className="flex items-center gap-1.5 text-sm text-text-secondary cursor-pointer select-none">
               <input type="checkbox" checked={pipelineResume} onChange={(e) => setPipelineResume(e.target.checked)} className="accent-[var(--accent)]" />
@@ -229,7 +228,7 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
               <span className="font-mono text-text-primary">{project?.base_model ?? "—"}</span>). Modules cibles LoRA et
               quantization 4-bit repris tels quels des configs existantes.
             </p>
-            {newConfigError && <p className="text-error text-sm">{newConfigError}</p>}
+            {createConfigAction.error && <p className="text-error text-sm">{createConfigAction.error}</p>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Field label="Nom">
                 <Input value={newConfigName} onChange={setNewConfigName} placeholder="r24_test" />
@@ -266,9 +265,9 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
             <Button
               variant="accent"
               onClick={createConfig}
-              disabled={!newConfigName.trim() || !newConfigDatasetVersion.trim()}
+              disabled={createConfigAction.busy || !newConfigName.trim() || !newConfigDatasetVersion.trim()}
             >
-              Créer la config
+              {createConfigAction.busy ? "Création…" : "Créer la config"}
             </Button>
           </Card>
         )}
@@ -285,25 +284,33 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
           <span className="font-mono text-accent">r=32</span> meilleur résultat (100% JSON valide, eval loss le plus
           bas) — voir <Link href="/" className="text-accent hover:underline">le dashboard</Link>.
         </Card>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {configs.map((cfg) => (
-            <Card key={cfg.filename} className="space-y-3">
-              <div>
-                <p className="font-mono text-sm text-text-primary">{cfg.filename}</p>
-                <p className="text-text-muted text-xs mt-1 leading-relaxed">{cfg.notes}</p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Pill>{cfg.base_model.split("/").pop()}</Pill>
-                <Pill>r={cfg.lora_r}</Pill>
-                <Pill>{cfg.dataset_version}</Pill>
-                {cfg.has_result && <span className="text-success text-xs font-medium">✓ résultat</span>}
-              </div>
-              <Button onClick={() => startTraining(cfg.filename)} disabled={!preflight?.ready} className="w-full">
-                Lancer
-              </Button>
-            </Card>
-          ))}
-        </div>
+        {!configsLoaded ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-32" />
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-3">
+            {configs.map((cfg) => (
+              <Card key={cfg.filename} className="space-y-3">
+                <div>
+                  <p className="font-mono text-sm text-text-primary">{cfg.filename}</p>
+                  <p className="text-text-muted text-xs mt-1 leading-relaxed">{cfg.notes}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Pill>{cfg.base_model.split("/").pop()}</Pill>
+                  <Pill>r={cfg.lora_r}</Pill>
+                  <Pill>{cfg.dataset_version}</Pill>
+                  {cfg.has_result && <span className="text-success text-xs font-medium">✓ résultat</span>}
+                </div>
+                <Button onClick={() => startTraining(cfg.filename)} disabled={!preflight?.ready} className="w-full">
+                  Lancer
+                </Button>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
 
       <section>
@@ -394,15 +401,6 @@ function ProjectTraining({ projectId, project }: { projectId: string; project: P
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-text-muted">
-      {label}
-      {children}
-    </label>
-  );
-}
-
 function NumberInput({
   value,
   onChange,
@@ -421,7 +419,7 @@ function NumberInput({
       step={step}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
-      className="bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+      className="bg-bg border border-border rounded-md px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors"
     />
   );
 }
