@@ -43,12 +43,11 @@ export function simulate(input: SimulatorInput): SimulatorResult {
   const monthlyNet = grossMargin - fixedMonthlyCost;
   const breakEvenMonths = upfront >= 0 ? 0 : monthlyNet > 0 ? Math.ceil(-upfront / monthlyNet) : null;
 
-  const revenuePerClient = setupPrice + monthlyPrice * 12;
-  const clientsFor100k = revenuePerClient > 0 ? Math.ceil(100000 / revenuePerClient) : Infinity;
-  const clientsFor500k = revenuePerClient > 0 ? Math.ceil(500000 / revenuePerClient) : Infinity;
-  const clientsFor1M = revenuePerClient > 0 ? Math.ceil(1000000 / revenuePerClient) : Infinity;
+  const annualCosts = (variableCostPerClient * clients + fixedMonthlyCost) * 12 + acquisitionCost;
+  const roi = annualCosts > 0 ? ((annualRevenue - annualCosts) / annualCosts) * 100 : null;
 
-  const roi = acquisitionCost > 0 ? ((annualRevenue - acquisitionCost) / acquisitionCost) * 100 : null;
+  const perClientAnnualValue = monthlyPrice * 12 + setupPrice;
+  const clientsFor = (target: number) => (perClientAnnualValue > 0 ? Math.ceil(target / perClientAnnualValue) : 0);
 
   return {
     monthlyRevenue,
@@ -59,12 +58,14 @@ export function simulate(input: SimulatorInput): SimulatorResult {
     netMarginEstimate,
     breakEvenMonths,
     roi,
-    clientsFor100k,
-    clientsFor500k,
-    clientsFor1M,
+    clientsFor100k: clientsFor(100_000),
+    clientsFor500k: clientsFor(500_000),
+    clientsFor1M: clientsFor(1_000_000),
   };
 }
 
+// ponytail: dev-only smoke check standing in for a unit test — web/ has no JS test
+// runner configured; add a real test here if one is ever introduced.
 if (process.env.NODE_ENV !== "production") {
   const example = simulate({
     setupPrice: 15000,
