@@ -160,13 +160,13 @@ Quinze pages chargent des données et reçoivent donc un état de chargement fon
 
 `components/project-switcher.tsx` est traité avec les pages : son `<select>` de projet et les deux `<select>` de son formulaire de création passent aux primitives, et son `setError(String(e))` passe par `useAction`.
 
-**Risque identifié — le chat.** `chat/page.tsx` envoie le message par `onKeyDown` sur un `<textarea>`. En passant à `<form>`, il faut conserver exactement le comportement actuel : Entrée envoie, Maj+Entrée insère un retour à la ligne. C'est le seul endroit où le passage à `<form>` peut casser une interaction existante ; il est à vérifier au navigateur et non seulement au compilateur.
+**Risque identifié — le chat, revu en phase de planification.** `chat/page.tsx` envoie le message par `onKeyDown` (touche Entrée) sur un `<input>` mono-ligne, et non un `<textarea>` comme supposé initialement en brainstorming. Un `<input>` ne gère aucun retour à la ligne, avec ou sans Maj : il n'y a donc pas de comportement Maj+Entrée à préserver sur ce champ. Le champ reste hors `<form>` ; seul son style passe par la primitive partagée `Input`. Vérification navigateur maintenue par prudence (Entrée envoie toujours après la migration).
 
 ## Vérification
 
 1. `npx tsc --noEmit` à chaque tâche — le seul contrôle automatique disponible côté frontend.
 2. `console.assert` en développement pour les deux fonctions pures : `humanError` (quatre branches) et le filtre de la palette (correspondance insensible aux accents et à la casse, aucune correspondance).
-3. Parcours navigateur en fin de chantier : créer une opportunité en validant par Entrée ; arrêter le backend et vérifier que le message affiché est « API injoignable… » et non une trace ; déclencher une erreur 404 et vérifier que seul le `detail` s'affiche ; ouvrir ⌘K et naviguer vers trois pages au clavier ; parcourir un formulaire à la touche Tab pour voir l'anneau de focus ; supprimer un élément dans `rag` pour voir le `ConfirmDialog` ; envoyer un message dans le chat avec Entrée puis insérer un retour à la ligne avec Maj+Entrée.
+3. Parcours navigateur en fin de chantier : créer une opportunité en validant par Entrée ; arrêter le backend et vérifier que le message affiché est « API injoignable… » et non une trace ; déclencher une erreur 404 et vérifier que seul le `detail` s'affiche ; ouvrir ⌘K et naviguer vers trois pages au clavier ; parcourir un formulaire à la touche Tab pour voir l'anneau de focus ; supprimer un élément dans `rag` pour voir le `ConfirmDialog` ; envoyer un message dans le chat avec Entrée.
 4. `pytest` (89 tests) en fin de chantier pour confirmer que le backend n'a pas bougé.
 
 ## Découpage prévu
