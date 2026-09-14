@@ -197,12 +197,22 @@ def analyze_opportunity(opportunity_id: str, body: AnalyzeRequest, request: Requ
         raw = generate(provider, prompt)
     except (requests.RequestException, ProviderCallError) as exc:
         raise HTTPException(502, f"Appel du fournisseur impossible : {exc}") from exc
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(text)
     except json.JSONDecodeError as exc:
         raise HTTPException(502, "Le fournisseur n’a pas renvoyé de JSON valide") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(502, "Le fournisseur n’a pas renvoyé un objet JSON")
+    score = parsed.get("recommended_score")
+    if score is not None and (isinstance(score, bool) or not isinstance(score, (int, float))):
+        raise HTTPException(502, "Le fournisseur a renvoyé un score invalide")
     result = store.save_ai_analysis(opportunity_id, body.project_id, body.provider_id, parsed,
-                                     parsed.get("recommended_score"), current.id)
+                                     score, current.id)
     store.audit(current.id, "opportunity.analyzed", "opportunity", opportunity_id, body.project_id,
                 {"provider_id": body.provider_id})
     return result

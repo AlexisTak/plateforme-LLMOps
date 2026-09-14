@@ -60,3 +60,20 @@ def test_analyze_requires_known_provider():
     response = client.post(f"/api/opportunities/{opportunity_id}/analyze",
                             json={"project_id": "no-such-project", "provider_id": "no-such-provider"})
     assert response.status_code == 404
+
+
+def test_analyze_returns_502_on_malformed_llm_response(monkeypatch):
+    client = TestClient(app)
+    provider = client.put("/api/enterprise/projects/assistant/providers", json={
+        "name": "Test malformed", "type": "ollama", "base_url": "http://localhost:11434",
+        "model": "llama:3b", "api_key_env": None, "enabled": True,
+    }).json()
+
+    monkeypatch.setattr("api.routes.opportunities.generate", lambda provider, prompt: "```json\n[1,2,3]\n```")
+
+    opportunity_id = client.get("/api/opportunities").json()[0]["id"]
+    response = client.post(f"/api/opportunities/{opportunity_id}/analyze",
+                            json={"project_id": "assistant", "provider_id": provider["id"]})
+    assert response.status_code == 502
+
+    client.delete(f"/api/enterprise/projects/assistant/providers/{provider['id']}")

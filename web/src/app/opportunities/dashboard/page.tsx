@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, Opportunity, SCORE_LABELS } from "@/lib/api";
 import { BarChart } from "@/components/bar-chart";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
+import { clientsForTarget } from "@/lib/simulator";
 
 const MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
 
@@ -21,8 +22,8 @@ export default function OpportunitiesDashboardPage() {
   if (opportunities.length === 0) return <EmptyState>Aucune opportunité à comparer.</EmptyState>;
 
   const clientsFor = (target: number, item: Opportunity) => {
-    const perClientYear = item.monthly_price * 12 + item.setup_price;
-    return perClientYear > 0 ? Math.ceil(target / perClientYear) : "n/a";
+    const result = clientsForTarget(item.monthly_price * 12 + item.setup_price, target);
+    return result == null ? "n/a" : result;
   };
 
   return <div className="space-y-8">
@@ -30,7 +31,7 @@ export default function OpportunitiesDashboardPage() {
 
     <Card>
       <p className="text-xs uppercase tracking-wide text-text-muted mb-3">Score /100</p>
-      <BarChart data={opportunities.map((o) => ({ label: o.name, value: o.score.total, highlight: o.score.total >= 85 }))} unit="/100" />
+      <BarChart data={opportunities.map((o) => ({ label: o.name, value: o.score.total, highlight: o.score.total >= 85 }))} unit="/100" formatValue={(v) => String(v)} />
     </Card>
 
     <div className="overflow-x-auto">

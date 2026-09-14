@@ -19,10 +19,14 @@ export type SimulatorResult = {
   netMarginEstimate: number;
   breakEvenMonths: number | null;
   roi: number | null;
-  clientsFor100k: number;
-  clientsFor500k: number;
-  clientsFor1M: number;
+  clientsFor100k: number | null;
+  clientsFor500k: number | null;
+  clientsFor1M: number | null;
 };
+
+export function clientsForTarget(perClientAnnualValue: number, target: number): number | null {
+  return perClientAnnualValue > 0 ? Math.ceil(target / perClientAnnualValue) : null;
+}
 
 export function simulate(input: SimulatorInput): SimulatorResult {
   const { setupPrice, monthlyPrice, clients, humanCost, infraCost, llmCost, cac, salesCost } = input;
@@ -47,7 +51,7 @@ export function simulate(input: SimulatorInput): SimulatorResult {
   const roi = annualCosts > 0 ? ((annualRevenue - annualCosts) / annualCosts) * 100 : null;
 
   const perClientAnnualValue = monthlyPrice * 12 + setupPrice;
-  const clientsFor = (target: number) => (perClientAnnualValue > 0 ? Math.ceil(target / perClientAnnualValue) : 0);
+  const clientsFor = (target: number) => clientsForTarget(perClientAnnualValue, target);
 
   return {
     monthlyRevenue,

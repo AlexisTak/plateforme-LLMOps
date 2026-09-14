@@ -75,6 +75,9 @@ export default function OpportunityDetailPage() {
     try { await work(); await refresh(); } catch (e) { setError(String(e)); } finally { setBusy(false); }
   };
 
+  if (error && (!fields || !scores)) {
+    return <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>;
+  }
   if (!fields || !scores) return <p>Chargement…</p>;
 
   const total = SCORE_FIELDS.reduce((sum, f) => sum + scores[f.key], 0);
@@ -225,9 +228,9 @@ function SimulatorPanel({ input, onChange }: { input: SimulatorInput; onChange: 
       <Metric label="Marge nette (estim.)" value={`${result.netMarginEstimate.toLocaleString("fr-FR")} €`} />
       <Metric label="Break-even" value={result.breakEvenMonths == null ? "jamais" : `${result.breakEvenMonths} mois`} />
       <Metric label="ROI" value={result.roi == null ? "n/a" : `${result.roi.toFixed(0)} %`} />
-      <Metric label="Clients pour 100k€" value={`${result.clientsFor100k}`} />
-      <Metric label="Clients pour 500k€" value={`${result.clientsFor500k}`} />
-      <Metric label="Clients pour 1M€" value={`${result.clientsFor1M}`} />
+      <Metric label="Clients pour 100k€" value={result.clientsFor100k == null ? "n/a" : `${result.clientsFor100k}`} />
+      <Metric label="Clients pour 500k€" value={result.clientsFor500k == null ? "n/a" : `${result.clientsFor500k}`} />
+      <Metric label="Clients pour 1M€" value={result.clientsFor1M == null ? "n/a" : `${result.clientsFor1M}`} />
     </div>
   </Card>;
 }

@@ -22,7 +22,10 @@ def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
             timeout=timeout,
         )
         response.raise_for_status()
-        return response.json()["response"]
+        try:
+            return response.json()["response"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderCallError(f"Réponse Ollama inattendue : {exc}") from exc
 
     headers: dict[str, str] = {}
     if provider.get("api_key_env"):
@@ -38,12 +41,15 @@ def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
     if provider["type"] == "anthropic-compatible":
         response = requests.post(
             f"{provider['base_url']}/v1/messages", headers=headers,
-            json={"model": provider["model"], "max_tokens": 2000,
+            json={"model": provider["model"], "max_tokens": 4000,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
         response.raise_for_status()
-        return response.json()["content"][0]["text"]
+        try:
+            return response.json()["content"][0]["text"]
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ProviderCallError(f"Réponse Anthropic inattendue : {exc}") from exc
 
     response = requests.post(
         f"{provider['base_url']}/v1/chat/completions", headers=headers,
@@ -51,4 +57,7 @@ def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
         timeout=timeout,
     )
     response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
+    try:
+        return response.json()["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ProviderCallError(f"Réponse fournisseur inattendue : {exc}") from exc
