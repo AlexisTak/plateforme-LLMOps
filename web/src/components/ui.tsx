@@ -55,12 +55,14 @@ export function Input({
   placeholder,
   className = "",
   onKeyDown,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -68,7 +70,8 @@ export function Input({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       onKeyDown={onKeyDown}
-      className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors ${className}`}
+      disabled={disabled}
+      className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     />
   );
 }

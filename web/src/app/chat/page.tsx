@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Button, PageHeader } from "@/components/ui";
+import { Button, Input, PageHeader, Select } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
+import { humanError } from "@/lib/errors";
 
 type Turn = { role: "user" | "assistant"; content: string; ragChunks?: string[] };
 
@@ -104,7 +105,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
         setAdapter(saved && r.adapters.includes(saved) ? saved : null);
       } catch { /* storage can be disabled; base model remains available */ }
       setReady(true);
-    }).catch((e) => { if (active) setError(String(e)); });
+    }).catch((e) => { if (active) setError(humanError(e)); });
     return () => { active = false; };
   }, [projectId]);
 
@@ -132,7 +133,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
     } catch (e) {
       setTurns(previousTurns);
       setInput(message);
-      setError(String(e));
+      setError(humanError(e));
     } finally {
       setBusy(false);
     }
@@ -154,15 +155,13 @@ function ProjectChat({ projectId }: { projectId: string }) {
               />
               RAG
             </label>
-            <select
+            <Select
               value={adapter ?? ""}
               disabled={busy || !ready}
-              aria-label="Modèle du projet"
-              onChange={(e) => {
-                setAdapter(e.target.value || null);
-                try { localStorage.setItem(`openagent:adapter:${projectId}`, e.target.value); } catch { /* optional */ }
+              onChange={(v) => {
+                setAdapter(v || null);
+                try { localStorage.setItem(`openagent:adapter:${projectId}`, v); } catch { /* optional */ }
               }}
-              className="bg-surface border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
             >
               <option value="">base (sans LoRA)</option>
               {adapters.map((a) => (
@@ -170,7 +169,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
                   {a}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         }
       />
@@ -209,15 +208,13 @@ function ProjectChat({ projectId }: { projectId: string }) {
       </div>
 
       <div className="flex gap-2 mt-3">
-        <input
+        <Input
           value={input}
-          maxLength={8000}
           disabled={busy || !ready}
-          aria-label="Message"
-          onChange={(e) => setInput(e.target.value)}
+          onChange={setInput}
           onKeyDown={(e) => e.key === "Enter" && send()}
           placeholder="Écris un message…"
-          className="flex-1 bg-surface border border-border rounded-md px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+          className="flex-1"
         />
         <Button variant="accent" onClick={send} disabled={busy || !ready || !input.trim()}>
           Envoyer

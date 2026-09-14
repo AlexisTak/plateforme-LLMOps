@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagDocument, RagSearchResult } from "@/lib/api";
-import { Button, Card, EmptyState, Input, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge, Textarea } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
+import { useAction } from "@/lib/use-action";
 
 const CATEGORY_LABELS: Record<string, string> = {
   methods: "Méthodes d'organisation",
@@ -14,17 +15,13 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function CategorySelect({ value, onChange }: { value: RagCategory; onChange: (v: RagCategory) => void }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as RagCategory)}
-      className="bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
-    >
+    <Select value={value} onChange={(v) => onChange(v as RagCategory)}>
       {RAG_CATEGORIES.map((c) => (
         <option key={c} value={c}>
           {CATEGORY_LABELS[c]}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -32,8 +29,6 @@ export default function RagPage() {
   const { projectId } = useProject();
   const [documents, setDocuments] = useState<RagDocument[]>([]);
   const [reindexJob, setReindexJob] = useState<JobStatus | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [uploadCategory, setUploadCategory] = useState<RagCategory>("research");
   const [newFilename, setNewFilename] = useState("");
@@ -44,10 +39,14 @@ export default function RagPage() {
   const [results, setResults] = useState<RagSearchResult[] | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = () => {
     if (!projectId) return;
-    api.rag.documents(projectId).then(setDocuments);
+    api.rag.documents(projectId).then((docs) => {
+      setDocuments(docs);
+      setLoaded(true);
+    });
   };
 
   useEffect(() => {
@@ -80,54 +79,53 @@ export default function RagPage() {
     api.jobs.get(jobId).then(setReindexJob);
   };
 
+  const pasteAction = useAction(
+    (filename: string, category: RagCategory, content: string) => api.rag.createDocument(projectId!, filename, category, content),
+    { success: (doc) => `${doc.filename} ajouté.` },
+  );
   const handlePaste = async () => {
     if (!newFilename.trim() || !newContent.trim() || !projectId) return;
     const filename = newFilename.trim().endsWith(".md") ? newFilename.trim() : `${newFilename.trim()}.md`;
-    setError(null);
-    try {
-      const doc = await api.rag.createDocument(projectId, filename, newCategory, newContent);
+    const doc = await pasteAction.run(filename, newCategory, newContent);
+    if (doc) {
       setNewFilename("");
       setNewContent("");
       trackReindexJob(doc.reindex_job_id);
       refresh();
-    } catch (e) {
-      setError(String(e));
     }
   };
 
+  const uploadAction = useAction((file: File, category: RagCategory) => api.rag.uploadDocument(projectId!, file, category), {
+    success: (doc) => `${doc.filename} envoyé.`,
+  });
   const handleFileUpload = async (file: File) => {
     if (!projectId) return;
-    setError(null);
-    setUploading(true);
-    try {
-      const doc = await api.rag.uploadDocument(projectId, file, uploadCategory);
+    const doc = await uploadAction.run(file, uploadCategory);
+    if (doc) {
       trackReindexJob(doc.reindex_job_id);
       refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const [pendingDelete, setPendingDelete] = useState<{ category: string; filename: string } | null>(null);
+  const deleteAction = useAction((category: string, filename: string) => api.rag.deleteDocument(projectId!, category, filename));
+  const handleDelete = (category: string, filename: string) => setPendingDelete({ category, filename });
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { category, filename } = pendingDelete;
+    setPendingDelete(null);
+    const res = await deleteAction.run(category, filename);
+    if (res) {
+      trackReindexJob(res.reindex_job_id);
+      refresh();
     }
   };
 
-  const handleDelete = async (category: string, filename: string) => {
-    if (!projectId) return;
-    if (!confirm(`Supprimer ${filename} ?`)) return;
-    const res = await api.rag.deleteDocument(projectId, category, filename);
-    trackReindexJob(res.reindex_job_id);
-    refresh();
-  };
-
+  const reindexAction = useAction(() => api.rag.reindex(projectId!));
   const handleReindex = async () => {
-    if (!projectId) return;
-    setError(null);
-    try {
-      const job = await api.rag.reindex(projectId);
-      setReindexJob(job);
-    } catch (e) {
-      setError(String(e));
-    }
+    const job = await reindexAction.run();
+    if (job) setReindexJob(job);
   };
 
   const handleSearch = async () => {
@@ -143,14 +141,23 @@ export default function RagPage() {
         action={
           <div className="flex items-center gap-3">
             {reindexJob?.status === "running" && <StatusBadge status="running" />}
-            <Button variant="ghost" onClick={handleReindex} disabled={reindexJob?.status === "running"}>
+            <Button variant="ghost" onClick={handleReindex} disabled={reindexJob?.status === "running" || reindexAction.busy}>
               Forcer une reconstruction
             </Button>
           </div>
         }
       />
 
-      {error && <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>}
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Supprimer ce document ?"
+        description={pendingDelete ? pendingDelete.filename : undefined}
+        confirmLabel="Supprimer"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+
       {reindexJob?.status === "running" && (
         <Card className="border-info/30 bg-info-soft text-text-secondary text-sm">
           Index en reconstruction automatique (job {reindexJob.job_id})…
@@ -175,37 +182,43 @@ export default function RagPage() {
         </Card>
       )}
 
-      {RAG_CATEGORIES.map((cat) => {
-        const docs = grouped.get(cat) ?? [];
-        if (docs.length === 0) return null;
-        return (
-          <section key={cat}>
-            <SectionTitle>
-              {CATEGORY_LABELS[cat]} ({docs.length})
-            </SectionTitle>
-            <div className="space-y-2">
-              {docs.map((doc) => (
-                <Card key={`${doc.category}/${doc.filename}`} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Pill>{doc.filename}</Pill>
-                    <div className="flex items-center gap-3">
-                      <span className="text-text-muted text-xs font-mono">{doc.char_count} chars</span>
-                      <button
-                        onClick={() => handleDelete(doc.category, doc.filename)}
-                        className="text-error/80 hover:text-error text-xs font-medium transition-colors"
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-text-secondary text-sm leading-relaxed line-clamp-2">{doc.preview}</p>
-                </Card>
-              ))}
-            </div>
-          </section>
-        );
-      })}
-      {documents.length === 0 && <EmptyState>Aucun document. Ajoute-en un ci-dessous.</EmptyState>}
+      {!loaded ? (
+        <Skeleton className="h-32" />
+      ) : (
+        <>
+          {RAG_CATEGORIES.map((cat) => {
+            const docs = grouped.get(cat) ?? [];
+            if (docs.length === 0) return null;
+            return (
+              <section key={cat}>
+                <SectionTitle>
+                  {CATEGORY_LABELS[cat]} ({docs.length})
+                </SectionTitle>
+                <div className="space-y-2">
+                  {docs.map((doc) => (
+                    <Card key={`${doc.category}/${doc.filename}`} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Pill>{doc.filename}</Pill>
+                        <div className="flex items-center gap-3">
+                          <span className="text-text-muted text-xs font-mono">{doc.char_count} chars</span>
+                          <button
+                            onClick={() => handleDelete(doc.category, doc.filename)}
+                            className="text-error/80 hover:text-error text-xs font-medium transition-colors"
+                          >
+                            Supprimer
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-text-secondary text-sm leading-relaxed line-clamp-2">{doc.preview}</p>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+          {documents.length === 0 && <EmptyState>Aucun document. Ajoute-en un ci-dessous.</EmptyState>}
+        </>
+      )}
 
       <section className="border-t border-border pt-6 space-y-6">
         <SectionTitle>Ajouter un document</SectionTitle>
@@ -219,11 +232,11 @@ export default function RagPage() {
             ref={fileInputRef}
             type="file"
             accept=".pdf,.txt,.md"
-            disabled={uploading}
+            disabled={uploadAction.busy}
             onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
             className="text-sm text-text-secondary file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-surface-hover file:text-text-primary file:text-sm hover:file:bg-border cursor-pointer disabled:opacity-50"
           />
-          {uploading && <p className="text-text-muted text-xs">Extraction du texte…</p>}
+          {uploadAction.busy && <p className="text-text-muted text-xs">Extraction du texte…</p>}
         </Card>
 
         <Card className="space-y-3">
@@ -232,14 +245,8 @@ export default function RagPage() {
             <CategorySelect value={newCategory} onChange={setNewCategory} />
           </div>
           <Input value={newFilename} onChange={setNewFilename} placeholder="nom_du_document.md" />
-          <textarea
-            value={newContent}
-            onChange={(e) => setNewContent(e.target.value)}
-            placeholder="# Titre&#10;&#10;Contenu du document en markdown…"
-            rows={6}
-            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors font-mono"
-          />
-          <Button onClick={handlePaste}>Ajouter</Button>
+          <Textarea value={newContent} onChange={setNewContent} placeholder="# Titre&#10;&#10;Contenu du document en markdown…" rows={6} className="font-mono" />
+          <Button onClick={handlePaste} disabled={pasteAction.busy}>{pasteAction.busy ? "Ajout…" : "Ajouter"}</Button>
         </Card>
       </section>
 
