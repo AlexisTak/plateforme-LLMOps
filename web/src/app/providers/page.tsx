@@ -30,7 +30,7 @@ function ProjectProviders({ projectId }: { projectId: string }) {
     success: (result) => `Connexion réussie en ${result.latency_ms} ms`,
   });
   const [pendingRemove, setPendingRemove] = useState<Provider | null>(null);
-  const removeAction = useAction((id: string) => api.enterprise.removeProvider(projectId, id));
+  const removeAction = useAction((id: string) => api.enterprise.removeProvider(projectId, id), { success: "Fournisseur supprimé." });
   const confirmRemove = async () => {
     if (!pendingRemove) return;
     const item = pendingRemove;
