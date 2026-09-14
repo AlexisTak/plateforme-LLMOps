@@ -1,5 +1,12 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+export class ApiError extends Error {
+  constructor(readonly status: number, readonly path: string, readonly detail: string) {
+    super(`${status} ${path}: ${detail}`);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -7,7 +14,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status} ${path}: ${text}`);
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = parsed.detail || text;
+    } catch {
+      // not JSON, use raw text
+    }
+    throw new ApiError(res.status, path, detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
