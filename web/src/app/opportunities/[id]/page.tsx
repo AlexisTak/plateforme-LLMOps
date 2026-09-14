@@ -13,6 +13,13 @@ import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle } from "@/comp
 const STATUSES: Opportunity["status"][] = [
   "idee", "analyse", "validation", "poc", "pilote", "commercialisation", "production", "abandonnee",
 ];
+function labelForTotal(total: number): Opportunity["score"]["label"] {
+  if (total >= 85) return "priorite_strategique";
+  if (total >= 70) return "tres_interessant";
+  if (total >= 55) return "a_tester";
+  if (total >= 40) return "risque";
+  return "a_eviter";
+}
 const SCORE_FIELDS: { key: keyof OpportunityScores; label: string; max: number }[] = [
   { key: "market", label: "Marché", max: 20 },
   { key: "profitability", label: "Rentabilité", max: 20 },
@@ -28,7 +35,6 @@ export default function OpportunityDetailPage() {
   const id = params.id;
   const [fields, setFields] = useState<OpportunityFields | null>(null);
   const [status, setStatus] = useState<Opportunity["status"]>("idee");
-  const [scoreLabel, setScoreLabel] = useState<Opportunity["score"]["label"]>("a_eviter");
   const [scores, setScores] = useState<OpportunityScores | null>(null);
   const [kpis, setKpis] = useState<OpportunityKpi[]>([]);
   const [analyses, setAnalyses] = useState<OpportunityAnalysis[]>([]);
@@ -46,7 +52,6 @@ export default function OpportunityDetailPage() {
     ]);
     setFields(item);
     setStatus(item.status);
-    setScoreLabel(item.score.label);
     setScores(item.scores);
     setKpis(kpiList);
     setAnalyses(analysisList);
@@ -73,7 +78,7 @@ export default function OpportunityDetailPage() {
   if (!fields || !scores) return <p>Chargement…</p>;
 
   const total = SCORE_FIELDS.reduce((sum, f) => sum + scores[f.key], 0);
-  const label = SCORE_LABELS[scoreLabel];
+  const label = SCORE_LABELS[labelForTotal(total)];
 
   return <div className="space-y-8">
     <PageHeader title={fields.name} description={fields.value_proposition}
