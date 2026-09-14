@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetStats, ExperimentResult, JobStatus, RagDocument } from "@/lib/api";
-import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle, StatusBadge } from "@/components/ui";
+import { Button, Card, EmptyState, PageHeader, Pill, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { BarChart } from "@/components/bar-chart";
 import { useProject } from "@/lib/project-context";
+import { useAction } from "@/lib/use-action";
+import { humanError } from "@/lib/errors";
 
 const RAG_CATEGORY_LABELS: Record<string, string> = {
   methods: "Méthodes",
@@ -27,8 +29,6 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
   const [ragDocuments, setRagDocuments] = useState<RagDocument[] | null>(null);
   const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
-  const [trainingBusy, setTrainingBusy] = useState(false);
-  const [trainingError, setTrainingError] = useState<string | null>(null);
   const [deploymentOpen, setDeploymentOpen] = useState(false);
   const hadRunningJobs = useRef(false);
 
@@ -36,7 +36,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
     api.experiments
       .list(projectId)
       .then((items) => { setExperiments(items); setError(null); })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(humanError(e)));
     api.dataset.stats(projectId).then(setDatasetStats).catch(() => {});
     api.dataset.categories(projectId).then(setDatasetCategories).catch(() => {});
     api.rag.documents(projectId).then(setRagDocuments).catch(() => {});
@@ -68,18 +68,13 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
     };
   }, [refreshAll, refreshJobs]);
 
+  const trainAction = useAction((version: string) => api.training.sweep(projectId, version, true), {
+    success: "Sweep lancé — suis-le dans Training.",
+  });
   const trainCurrentVersion = async () => {
-    if (!currentVersion?.version || !projectId) return;
-    setTrainingBusy(true);
-    setTrainingError(null);
-    try {
-      await api.training.sweep(projectId, currentVersion.version, true);
-      refreshAll();
-    } catch (e) {
-      setTrainingError(String(e));
-    } finally {
-      setTrainingBusy(false);
-    }
+    if (!currentVersion?.version) return;
+    const result = await trainAction.run(currentVersion.version);
+    if (result) refreshAll();
   };
 
   const best = experiments?.reduce<ExperimentResult | null>((acc, e) => {
@@ -134,7 +129,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
           <SectionTitle>Dataset par catégorie</SectionTitle>
           <Card className="space-y-2">
             {!datasetCategories ? (
-              <p className="text-text-muted text-sm">Chargement…</p>
+              <Skeleton className="h-24" />
             ) : datasetCategories.length === 0 ? (
               <EmptyState>Aucun exemple pour l&apos;instant.</EmptyState>
             ) : (
@@ -155,7 +150,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
           <SectionTitle>RAG par catégorie</SectionTitle>
           <Card className="space-y-2">
             {!ragDocuments ? (
-              <p className="text-text-muted text-sm">Chargement…</p>
+              <Skeleton className="h-24" />
             ) : ragDocuments.length === 0 ? (
               <EmptyState>Aucun document pour l&apos;instant.</EmptyState>
             ) : (
@@ -223,7 +218,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
       <section>
         <SectionTitle>Expériences</SectionTitle>
         {!experiments ? (
-          <p className="text-text-muted text-sm">Chargement…</p>
+          <Skeleton className="h-40" />
         ) : experiments.length === 0 ? (
           <EmptyState>Aucune expérience pour l&apos;instant. Lance un training depuis l&apos;onglet Training.</EmptyState>
         ) : (
@@ -312,8 +307,8 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
           <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
             <SectionTitle>Historique des versions du dataset</SectionTitle>
             {currentVersion?.version && (
-              <Button variant="accent" onClick={trainCurrentVersion} disabled={trainingBusy}>
-                Entraîner {currentVersion.version} (sweep r=8/16/32)
+              <Button variant="accent" onClick={trainCurrentVersion} disabled={trainAction.busy}>
+                {trainAction.busy ? "Lancement…" : `Entraîner ${currentVersion.version} (sweep r=8/16/32)`}
               </Button>
             )}
           </div>
@@ -324,7 +319,7 @@ function ProjectDashboard({ projectId }: { projectId: string }) {
             splits → entraîner) pour r=8/16/32 sur la version actuelle, un seul job de fond suivi dans{" "}
             <Link href="/training" className="text-accent hover:underline">Training</Link>.
           </p>
-          {trainingError && <Card className="border-error/30 bg-error-soft text-error text-sm mb-3">{trainingError}</Card>}
+          {trainAction.error && <Card className="border-error/30 bg-error-soft text-error text-sm mb-3">{trainAction.error}</Card>}
           <Card className="p-0 overflow-hidden">
             {(() => {
               const versionMap = (experiments ?? []).reduce((map, e) => {

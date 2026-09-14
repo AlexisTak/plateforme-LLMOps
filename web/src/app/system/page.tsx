@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api, SystemHealth } from "@/lib/api";
-import { Card, EmptyState, PageHeader, Pill, SectionTitle } from "@/components/ui";
+import { Card, EmptyState, PageHeader, Pill, SectionTitle, Skeleton } from "@/components/ui";
+import { humanError } from "@/lib/errors";
 
 function OkDot({ ok }: { ok: boolean }) {
   return <span className={`inline-block h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-error"}`} />;
@@ -19,7 +20,7 @@ export default function SystemPage() {
         setHealth(h);
         setError(null);
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(humanError(e)))
       .finally(() => setLoading(false));
   };
 
@@ -37,7 +38,15 @@ export default function SystemPage() {
       {error && <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>}
 
       {!health ? (
-        <p className="text-text-muted text-sm">{loading ? "Chargement…" : "—"}</p>
+        loading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-12" />
+            <Skeleton className="h-32" />
+            <Skeleton className="h-40" />
+          </div>
+        ) : (
+          <p className="text-text-muted text-sm">—</p>
+        )
       ) : (
         <>
           <Card className={health.ok ? "border-success/30 bg-success-soft" : "border-error/30 bg-error-soft"}>
