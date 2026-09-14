@@ -69,7 +69,10 @@ def test_analyze_returns_502_on_malformed_llm_response(monkeypatch):
         "model": "llama:3b", "api_key_env": None, "enabled": True,
     }).json()
 
-    monkeypatch.setattr("api.routes.opportunities.generate", lambda provider, prompt: "```json\n[1,2,3]\n```")
+    # Valid JSON, no fence — parses fine but isn't a dict. Pre-fix, `parsed.get(...)`
+    # then crashes with AttributeError on a list (unhandled 500); post-fix, the
+    # isinstance(parsed, dict) check catches it and returns a clean 502.
+    monkeypatch.setattr("api.routes.opportunities.generate", lambda provider, prompt: "[1,2,3]")
 
     opportunity_id = client.get("/api/opportunities").json()[0]["id"]
     response = client.post(f"/api/opportunities/{opportunity_id}/analyze",
