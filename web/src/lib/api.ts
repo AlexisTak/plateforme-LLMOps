@@ -269,6 +269,47 @@ export type Approval = { id: string; project_id: string; tool_id: string; tool_n
 export type ToolPolicy = { id: string; project_id: string; name: string; effect: "allow" | "deny" | "require_approval"; tool_id?: string | null; tool_name?: string | null; priority: number; enabled: number; created_at: string };
 export type McpServer = { id: string; project_id: string; name: string; url: string; api_key_env?: string | null; enabled: number; created_at: string };
 
+export type OpportunityStatus = "idee" | "analyse" | "validation" | "poc" | "pilote" | "commercialisation" | "production" | "abandonnee";
+export type OpportunityScores = {
+  market: number; profitability: number; feasibility: number; commercialization: number;
+  scalability: number; retention: number; risk: number;
+};
+export type OpportunityScore = {
+  total: number;
+  label: "priorite_strategique" | "tres_interessant" | "a_tester" | "risque" | "a_eviter";
+  breakdown: OpportunityScores;
+};
+export const SCORE_LABELS: Record<OpportunityScore["label"], { emoji: string; text: string }> = {
+  priorite_strategique: { emoji: "⭐", text: "Priorité stratégique" },
+  tres_interessant: { emoji: "🟢", text: "Très intéressant" },
+  a_tester: { emoji: "🟠", text: "À tester" },
+  risque: { emoji: "🟡", text: "Risqué" },
+  a_eviter: { emoji: "🔴", text: "À éviter" },
+};
+export type OpportunityFields = {
+  name: string; description: string; customer_problem: string; proposed_solution: string;
+  target_customer: string; sector: string; value_proposition: string; technologies: string[];
+  maturity: string; dev_difficulty: number; sales_difficulty: number; competition: string;
+  differentiation: string; business_model: string; setup_cost: number; monthly_cost: number;
+  setup_price: number; monthly_price: number; estimated_margin_pct: number;
+  recurring_revenue_potential: number; risks: string[]; regulatory_constraints: string;
+};
+export type Opportunity = OpportunityFields & {
+  id: string; status: OpportunityStatus; created_at: string; updated_at: string; created_by: string;
+  scores: OpportunityScores; score: OpportunityScore;
+};
+export type OpportunityKpi = {
+  id: string; opportunity_id: string; category: "commercial" | "financier" | "ia" | "retention";
+  name: string; unit: string; current_value: number | null; target_value: number | null;
+  previous_value: number | null; measured_at: string | null; higher_is_better: number;
+  created_at: string; evolution_pct: number | null; trend: "hausse" | "baisse" | "stable";
+  status: "atteint" | "attention" | "non_atteint" | "inconnu";
+};
+export type OpportunityAnalysis = {
+  id: string; opportunity_id: string; project_id: string; provider_id: string;
+  result: Record<string, unknown>; recommended_score: number | null; created_at: string; created_by: string;
+};
+
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
   systemHealth: () => request<SystemHealth>("/api/system/health"),
@@ -444,5 +485,26 @@ export const api = {
     mcpServers: (project: string) => request<McpServer[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers`),
     updateMcpServer: (project: string, server: Pick<McpServer, "name" | "url" | "api_key_env"> & { enabled: boolean }) => request<McpServer>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers`, { method: "PUT", body: JSON.stringify(server) }),
     syncMcpServer: (project: string, id: string) => request<{ discovered: number; imported: number; skipped: number; tools: ToolDefinition[] }>(`/api/enterprise/projects/${encodeURIComponent(project)}/mcp-servers/${encodeURIComponent(id)}/sync`, { method: "POST" }),
+  },
+
+  opportunities: {
+    list: () => request<Opportunity[]>("/api/opportunities"),
+    dashboard: () => request<Opportunity[]>("/api/opportunities/dashboard"),
+    create: (input: Partial<OpportunityFields> & Pick<OpportunityFields, "name">) =>
+      request<Opportunity>("/api/opportunities", { method: "POST", body: JSON.stringify(input) }),
+    get: (id: string) => request<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`),
+    update: (id: string, input: OpportunityFields) =>
+      request<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(input) }),
+    updateStatus: (id: string, status: OpportunityStatus) =>
+      request<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+    updateScores: (id: string, scores: OpportunityScores) =>
+      request<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}/scores`, { method: "PUT", body: JSON.stringify(scores) }),
+    remove: (id: string) => request<{ deleted: boolean }>(`/api/opportunities/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    kpis: (id: string) => request<OpportunityKpi[]>(`/api/opportunities/${encodeURIComponent(id)}/kpis`),
+    upsertKpi: (id: string, kpi: { name: string; category: OpportunityKpi["category"]; unit: string; current_value: number | null; target_value: number | null; higher_is_better: boolean }) =>
+      request<OpportunityKpi>(`/api/opportunities/${encodeURIComponent(id)}/kpis`, { method: "PUT", body: JSON.stringify(kpi) }),
+    analyze: (id: string, project_id: string, provider_id: string) =>
+      request<OpportunityAnalysis>(`/api/opportunities/${encodeURIComponent(id)}/analyze`, { method: "POST", body: JSON.stringify({ project_id, provider_id }) }),
+    analyses: (id: string) => request<OpportunityAnalysis[]>(`/api/opportunities/${encodeURIComponent(id)}/analyses`),
   },
 };
