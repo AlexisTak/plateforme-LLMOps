@@ -94,7 +94,9 @@ function ProjectBenchmarks({ projectId, model }: { projectId: string; model: str
     }
   };
 
-  const removeCaseAction = useAction((item: BenchmarkCase) => api.evaluation.removeCase(projectId, item.id));
+  const removeCaseAction = useAction((item: BenchmarkCase) => api.evaluation.removeCase(projectId, item.id), {
+    success: "Cas de benchmark supprimé.",
+  });
   const removeCase = (item: BenchmarkCase) => setPendingRemove(item);
   const confirmRemoveCase = async () => {
     if (!pendingRemove) return;
