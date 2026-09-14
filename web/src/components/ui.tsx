@@ -68,9 +68,89 @@ export function Input({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       onKeyDown={onKeyDown}
-      className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors ${className}`}
+      className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors ${className}`}
     />
   );
+}
+
+export function Select({
+  value,
+  onChange,
+  children,
+  className = "",
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+  className?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors ${className}`}
+    >
+      {children}
+    </select>
+  );
+}
+
+export function Textarea({
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+  maxLength,
+  className = "",
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  maxLength?: number;
+  className?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      maxLength={maxLength}
+      disabled={disabled}
+      className={`w-full bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors resize-y ${className}`}
+    />
+  );
+}
+
+export function Field({
+  label,
+  children,
+  hint,
+  error,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+  error?: string;
+}) {
+  return (
+    <label className="block text-xs text-text-muted space-y-1">
+      <span>{label}</span>
+      {children}
+      {hint && !error && <span className="block text-text-muted text-xs">{hint}</span>}
+      {error && <span className="block text-error text-xs">{error}</span>}
+    </label>
+  );
+}
+
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-surface-hover ${className}`} />;
 }
 
 const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
@@ -88,12 +168,27 @@ const STATUS_STYLES: Record<string, { dot: string; text: string }> = {
   archived: { dot: "bg-text-muted", text: "text-text-muted" },
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  running: "en cours",
+  completed: "terminé",
+  failed: "échec",
+  stopped: "arrêté",
+  draft: "brouillon",
+  evaluated: "évalué",
+  approved: "approuvé",
+  pending: "en attente",
+  processing: "en traitement",
+  denied: "refusé",
+  production: "production",
+  archived: "archivé",
+};
+
 export function StatusBadge({ status }: { status: string }) {
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.stopped;
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${style.text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
@@ -108,4 +203,50 @@ export function Pill({ children }: { children: ReactNode }) {
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return <p className="text-text-muted text-sm py-6 text-center border border-dashed border-border rounded-lg">{children}</p>;
+}
+
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel = "Confirmer",
+  cancelLabel = "Annuler",
+  danger,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-dialog-title"
+        className="bg-surface border border-border rounded-lg p-5 max-w-sm w-full space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-dialog-title" className="font-display text-base text-text-primary">
+          {title}
+        </h2>
+        {description && <p className="text-text-secondary text-sm">{description}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="ghost" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button variant={danger ? "danger" : "accent"} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
