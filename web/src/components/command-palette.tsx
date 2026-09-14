@@ -81,6 +81,12 @@ export function CommandPalette() {
         aria-label="Palette de commandes"
         className="bg-surface border border-border rounded-lg w-full max-w-md shadow-lg"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            close();
+          }
+        }}
       >
         <input
           ref={inputRef}
