@@ -18,35 +18,23 @@ export default function OpportunitiesPage() {
 
   useEffect(() => {
     let active = true;
-
-    refresh().then(() => {
-      if (active) {
-        // empty
-      }
-    });
-
-    return () => {
-      active = false;
-    };
+    refresh().catch((e) => { if (active) setError(String(e)); });
+    return () => { active = false; };
   }, [refresh]);
 
   const create = async () => {
-    setError(null);
-    setBusy(true);
+    setBusy(true); setError(null);
     try {
       await api.opportunities.create({ name: name.trim() });
       setName("");
       await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setError(String(e)); } finally { setBusy(false); }
   };
 
   return <div className="space-y-6">
-    <PageHeader title="Opportunités" description="Découvrez les opportunités IA pour l'ESN." />
-    {error && <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card>}
+    <PageHeader title="Opportunités Business IA" description="Cataloguer, scorer et suivre les offres IA de l'ESN."
+      action={<Link href="/opportunities/dashboard" className="px-3 py-1.5 text-sm rounded-md bg-surface-hover text-text-primary border border-border">Voir le dashboard</Link>} />
+    {error ? <Card className="border-error/30 bg-error-soft text-error text-sm">{error}</Card> : null}
     <Card className="flex flex-wrap gap-2">
       <Input value={name} onChange={setName} placeholder="Nom de la nouvelle opportunité" className="flex-1 min-w-56" />
       <Button variant="accent" disabled={busy || !name.trim()} onClick={create}>Créer</Button>
