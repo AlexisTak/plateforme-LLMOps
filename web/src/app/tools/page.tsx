@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Approval, api, McpServer, ToolDefinition, ToolPolicy } from "@/lib/api";
+import { Approval, api, McpServer, ToolDefinition, ToolPolicy, ToolRiskLevel } from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 import { Button, Card, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 
@@ -19,6 +19,7 @@ function ProjectTools({ projectId }: { projectId: string }) {
   const [url, setUrl] = useState("");
   const [method, setMethod] = useState<"GET" | "POST">("GET");
   const [approval, setApproval] = useState(false);
+  const [riskLevel, setRiskLevel] = useState<ToolRiskLevel>("medium");
   const [policyName, setPolicyName] = useState("");
   const [effect, setEffect] = useState<ToolPolicy["effect"]>("require_approval");
   const [targetTool, setTargetTool] = useState("");
@@ -87,8 +88,11 @@ function ProjectTools({ projectId }: { projectId: string }) {
         <Select value={method} onChange={(v) => setMethod(v as "GET" | "POST")}>
           <option>GET</option><option>POST</option>
         </Select>
+        <Select value={riskLevel} onChange={(v) => setRiskLevel(v as ToolRiskLevel)}>
+          <option value="low">Risque faible</option><option value="medium">Risque moyen</option><option value="high">Risque élevé</option><option value="critical">Risque critique</option>
+        </Select>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={approval} onChange={(event) => setApproval(event.target.checked)} />Approbation par défaut</label>
-        <Button variant="accent" disabled={busy || !name || !url} onClick={() => act(() => api.enterprise.updateTool(projectId, { name, method, url, approval_required: approval, timeout_seconds: 5, max_response_bytes: 100000 }))}>Enregistrer</Button>
+        <Button variant="accent" disabled={busy || !name || !url} onClick={() => act(() => api.enterprise.updateTool(projectId, { name, method, url, approval_required: approval, timeout_seconds: 5, max_response_bytes: 100000, risk_level: riskLevel }))}>Enregistrer</Button>
       </Card>
     </section>
 
@@ -114,7 +118,7 @@ function ProjectTools({ projectId }: { projectId: string }) {
     <section>
       <SectionTitle>Catalogue ({tools.length})</SectionTitle>
       {!loaded ? <Skeleton className="h-16" /> : tools.length === 0 ? <EmptyState>Aucun outil.</EmptyState> : <div className="space-y-2">{tools.map((tool) => <Card key={tool.id} className="flex justify-between gap-3 flex-wrap">
-        <div><p className="text-sm font-medium">{tool.name}</p><p className="text-xs font-mono text-text-muted mt-1">{tool.method} {tool.action || tool.url}</p>{tool.description ? <p className="text-xs text-text-secondary mt-1 max-w-xl">{tool.description}</p> : null}<div className="flex gap-2 mt-2">{tool.connector_type === "mcp" ? <Pill>MCP lecture</Pill> : null}{tool.approval_required ? <Pill>approbation par défaut</Pill> : <Pill>exécution directe par défaut</Pill>}</div></div>
+        <div><p className="text-sm font-medium">{tool.name}</p><p className="text-xs font-mono text-text-muted mt-1">{tool.method} {tool.action || tool.url}</p>{tool.description ? <p className="text-xs text-text-secondary mt-1 max-w-xl">{tool.description}</p> : null}<div className="flex gap-2 mt-2">{tool.connector_type === "mcp" ? <Pill>MCP lecture</Pill> : null}<Pill>risque {tool.risk_level}</Pill>{tool.approval_required ? <Pill>approbation par défaut</Pill> : <Pill>exécution directe par défaut</Pill>}</div></div>
         <Button disabled={busy} onClick={() => act(() => api.enterprise.executeTool(projectId, tool.id, {}))}>Tester sans arguments</Button>
       </Card>)}</div>}
     </section>

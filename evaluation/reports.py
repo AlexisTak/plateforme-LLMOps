@@ -9,6 +9,20 @@ from api.storage import atomic_write_text
 
 SCORING_VERSION = "human-rubric-v2"
 
+# CLAUDE.md §11: "une amélioration sur une métrique ne doit pas masquer une
+# régression critique sur une autre" — every *_pct axis is checked
+# independently, an improvement on one never cancels out a drop on another.
+REGRESSION_THRESHOLD_PCT = 5.0
+# refusal_rate_pct is the one *_pct metric where higher is worse — a rise, not
+# a drop, is the regression.
+LOWER_IS_BETTER_PCT_METRICS = {"refusal_rate_pct"}
+
+
+def _is_regression(metric: str, delta: float) -> bool:
+    if metric in LOWER_IS_BETTER_PCT_METRICS:
+        return delta > REGRESSION_THRESHOLD_PCT
+    return delta < -REGRESSION_THRESHOLD_PCT
+
 
 def fingerprint(path: Path) -> dict | None:
     if not path.exists():
@@ -67,14 +81,32 @@ def comparison(previous: dict, metadata: dict, summary: dict) -> dict:
         new = metadata["files"].get(name) or {}
         comparable = comparable and old.get("sha256") == new.get("sha256")
     deltas = {}
+    regressions = []
     if comparable:
         for label, metrics in summary.items():
             old = previous.get("summary", {}).get(label, {})
             if old.get("n") != metrics.get("n"):
                 continue
-            deltas[label] = {key: round(value - old[key], 1) for key, value in metrics.items()
-                             if key.endswith("_pct") and value is not None and old.get(key) is not None}
-    return {"comparable": bool(comparable), "previous_generated_at": old_meta.get("generated_at"), "deltas": deltas}
+            label_deltas = {}
+            for key, value in metrics.items():
+                if key.endswith("_pct") and value is not None and old.get(key) is not None:
+                    delta = round(value - old[key], 1)
+                    label_deltas[key] = delta
+                    if _is_regression(key, delta):
+                        regressions.append({"variant": label, "metric": key, "delta": delta})
+            old_latency, new_latency = old.get("latency_ms_mean"), metrics.get("latency_ms_mean")
+            if old_latency and new_latency is not None:
+                latency_delta_pct = round(100 * (new_latency - old_latency) / old_latency, 1)
+                label_deltas["latency_ms_mean_delta_pct"] = latency_delta_pct
+                if latency_delta_pct > REGRESSION_THRESHOLD_PCT * 2:  # latency tolerates more noise than a rubric score
+                    regressions.append({"variant": label, "metric": "latency_ms_mean", "delta_pct": latency_delta_pct})
+            deltas[label] = label_deltas
+    return {
+        "comparable": bool(comparable),
+        "previous_generated_at": old_meta.get("generated_at"),
+        "deltas": deltas,
+        "regressions": regressions,
+    }
 
 
 def save_report(project: Path, metadata: dict, summary: dict, outputs: dict, markdown: str) -> dict:

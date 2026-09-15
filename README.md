@@ -195,12 +195,103 @@ Entreprise permet ensuite d'ajouter les membres et de modifier leur rôle.
 la version en production. Aucune politique de contenu n'est imposée par ce socle.
 Le bouton **Télécharger la sauvegarde** produit un ZIP avec un manifeste SHA-256;
 les poids de modèles et index régénérables en sont exclus afin de garder l'archive
-transportable.
+transportable. `POST /api/enterprise/projects/{id}/restore` (multipart, champ
+`file`) restaure cette archive **sous un nouvel id de projet** — jamais par-dessus
+un projet existant — en vérifiant le SHA-256 de chaque fichier avant écriture ;
+tout écart d'intégrité annule la restauration et supprime le répertoire
+partiellement écrit. Réservé au rôle `admin`.
 
 En mode SSO, une version doit être approuvée par une autre personne que son
 créateur. Le benchmark est revérifié à chaque transition : toute modification
 du dataset, du prompt, du modèle ou des adapters impose de le relancer. Une
 version archivée déjà approuvée peut être restaurée en production par rollback.
+Une entrée de registre peut désormais porter `adapter`, `quantization`,
+`rag_version`, `environment` et un instantané `artifacts` (SHA-256 par fichier,
+réutilisé depuis les métadonnées d'évaluation) — tous optionnels, une version
+créée avant cette évolution reste lisible avec des valeurs par défaut.
+
+## Gouvernance des outils et supply chain
+
+Chaque outil déclaré (page **Outils et politiques**) porte désormais un
+`risk_level` explicite — `low`/`medium`/`high`/`critical` — en plus de
+`approval_required`. Un outil `critical` ne peut **jamais** s'exécuter sur la
+seule foi d'une politique `allow` : `evaluate_tool_policy` force
+systématiquement `require_approval` pour ce niveau de risque, sauf politique
+`deny` explicite qui reste prioritaire. C'est une garde déterministe, pas une
+option désactivable par la configuration — conforme à l'exigence « une action
+critique ne doit jamais être exécutée simplement parce qu'un LLM l'a demandé ».
+
+Chaque version du registre expose un manifeste SBOM minimal :
+`GET /api/enterprise/projects/{id}/registry/{item_id}/sbom` (bouton **SBOM**
+sur la page Entreprise) renvoie la provenance de la version (modèle, dataset,
+adapter, quantification, version RAG, artefacts SHA-256 déjà trackés) et la
+liste des dépendances Python épinglées dans `requirements.txt`. Objectif :
+répondre à « avec quoi exactement cette version a-t-elle été composée ? »
+sans dupliquer un outil SBOM industriel (pas de signatures ni de CycloneDX —
+à ajouter plus tard si un besoin de conformité l'exige réellement).
+
+Le multi-tenant complet (`Organization > Workspace > Project`) n'a **pas** été
+ajouté : chaque projet est déjà un espace isolé avec ses propres membres et
+rôles (`viewer`/`operator`/`reviewer`/`admin`, voir ci-dessus), ce qui couvre
+l'isolation et le contrôle d'accès pour un usage solo ou petite équipe. Ajouter
+une couche Organisation/Workspace n'apporterait de valeur qu'à partir d'un
+véritable besoin multi-équipes/multi-clients — à réévaluer si ce besoin se
+présente plutôt que par anticipation. De même, aucun client OIDC n'a été
+intégré : le mode `BISCUITS_AUTH_MODE=proxy` délègue déjà l'authentification
+(Entra ID, Okta, Auth0…) à une passerelle qui peut elle-même parler OIDC, ce
+qui évite d'embarquer une dépendance OIDC lourde dans le socle local.
+
+## Évaluation multi-axes et régression
+
+En plus du format et de la concision, chaque réponse du benchmark est désormais
+aussi notée sur un signal de refus (heuristique, hors ligne — motifs français
+et anglais courants, `evaluation/run.py::is_refusal`) et sa latence réelle.
+`evaluation/reports.py::comparison()` détecte maintenant les **régressions** :
+toute variation `plain_text_pct`/`json_valid_pct`/`has_expected_keys_pct`/
+`concise_pct` en baisse de plus de 5 points, toute hausse du taux de refus de
+plus de 5 points, ou toute hausse de latence de plus de 10 % est signalée dans
+`comparison.regressions`, même si le score global s'est amélioré par ailleurs
+— une amélioration sur un axe ne doit jamais masquer une régression sur un
+autre (voir CLAUDE.md §11).
+
+## Évaluation du RAG
+
+`GET /rag/eval-queries`, `POST /rag/eval-queries`, `DELETE /rag/eval-queries/{id}`
+gèrent un jeu de requêtes étiquetées (`rag/eval_queries.jsonl`, `{id, query,
+relevant_doc_ids}`). `POST /rag/evaluate?top_k=5` calcule Recall@K et MRR sur
+ce jeu et renvoie, pour audit, chaque requête avec les chunks effectivement
+récupérés et leurs scores (question → chunks → scores → contexte). Ne mesure
+que la qualité du retrieval, pas l'ancrage de la réponse finale du modèle dans
+ce contexte (nécessiterait un appel LLM, hors périmètre de cet outil hors
+ligne).
+
+## Dataset versioning
+
+Chaque appel à **Reconstruire** (`POST /dataset/prepare`) écrase toujours
+`data/{train,validation,test}` (comportement inchangé) mais prend aussi un
+instantané immuable dans `data/versions/<version>/`, avec un manifeste
+(auteur, date, effectifs par split, SHA-256). Reconstruire deux fois avec la
+même version et le même contenu est sans effet ; reconstruire avec la même
+version mais un contenu différent est refusé (409) — une version ne change
+jamais silencieusement. `GET /dataset/versions`, `GET /dataset/versions/{v}`
+et `GET /dataset/versions/{from}/diff/{to}` exposent l'historique et un diff
+(exemples ajoutés / supprimés / modifiés, par id stable).
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+Démarre l'API (port 8000) et la console (port 3000), avec healthchecks
+(`/api/ready` pour l'API vérifie que la base SQLite du plan de contrôle et le
+répertoire `projects/` sont bien accessibles, pas seulement que le processus a
+démarré). `./projects` et `./.enterprise` sont montés en volumes — les données
+survivent à `docker compose down`. Cette image ne contient jamais torch/CUDA :
+l'entraînement GPU continue de tourner sur le venv hôte (`./start.sh`), Docker
+ne sert qu'à démontrer et faire tourner le plan de contrôle de façon
+reproductible. `./start.sh` / `./start.ps1` restent le chemin principal pour le
+développement local et ne changent pas.
 
 ## Status
 

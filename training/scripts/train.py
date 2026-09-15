@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -51,6 +52,17 @@ class JsonlLoggerCallback(TrainerCallback):
 def load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def current_git_commit() -> str | None:
+    """Best-effort — provenance is nice-to-have, never a reason to fail a training run."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=5, check=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
 
 
 def build_dataset(path: Path):
@@ -203,6 +215,7 @@ def main() -> None:
         "peak_vram_mb": round(peak_vram_mb, 1) if peak_vram_mb else None,
         "adapter_size_mb": round(adapter_size_mb, 2),
         "output_dir": str(output_dir),
+        "git_commit": current_git_commit(),
     }
     result_path = experiments_dir / f"{experiment_id}.json"
     result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")

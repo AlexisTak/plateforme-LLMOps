@@ -67,7 +67,7 @@ class ValidationResult(BaseModel):
 
 
 class PrepareDatasetRequest(BaseModel):
-    version: str
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     seed: int = 42
 
 
@@ -76,6 +76,7 @@ class PrepareDatasetResult(BaseModel):
     train: int
     validation: int
     test: int
+    sha256: str | None = None  # immutable snapshot fingerprint, see DatasetVersionManifest
 
 
 class CurrentDatasetVersion(BaseModel):
@@ -83,6 +84,35 @@ class CurrentDatasetVersion(BaseModel):
     train: int
     validation: int
     test: int
+
+
+class DatasetVersionManifest(BaseModel):
+    """One immutable snapshot of data/{train,validation,test} taken at prepare()
+    time — see scripts/dataset_versions.py. Re-preparing the same version string
+    with different content is rejected rather than silently overwriting it."""
+
+    version: str
+    dataset: str
+    author: str
+    created_at: str
+    splits: dict[str, int]
+    example_count: int
+    sha256: str
+    seed: int
+
+
+class DatasetVersionDiffEntry(BaseModel):
+    split: str
+    id: str
+    summary: str
+
+
+class DatasetVersionDiff(BaseModel):
+    from_version: str
+    to_version: str
+    added: list[DatasetVersionDiffEntry]
+    removed: list[DatasetVersionDiffEntry]
+    modified: list[DatasetVersionDiffEntry]
 
 
 class DuplicateExample(BaseModel):
@@ -121,6 +151,7 @@ class ExperimentResult(BaseModel):
     peak_vram_mb: float | None = None
     adapter_size_mb: float | None = None
     output_dir: str | None = None
+    git_commit: str | None = None
 
 
 class TrainingConfigSummary(BaseModel):
@@ -263,6 +294,41 @@ class RagSearchResult(BaseModel):
 
 
 RagCategory = Literal["methods", "research", "product", "other"]
+
+
+class RagEvalQuery(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9_\-]{1,64}$")
+    query: str = Field(min_length=1, max_length=2000)
+    relevant_doc_ids: list[str] = Field(min_length=1)
+
+
+class RagEvalQueryChunk(BaseModel):
+    chunk_id: str
+    doc_id: str
+    category: str
+    score: float
+    text: str
+
+
+class RagEvalQueryResult(BaseModel):
+    id: str
+    query: str
+    relevant_doc_ids: list[str]
+    hit: bool
+    rank: int | None
+    chunks: list[RagEvalQueryChunk]
+
+
+class RagEvalResult(BaseModel):
+    """Retrieval quality only — Recall@K and MRR against relevant_doc_ids.
+    Doesn't call the LLM, so it says nothing about whether an eventual answer
+    is actually grounded in these chunks (see docs/RUNTIME_FIXES.md)."""
+
+    top_k: int
+    n_queries: int
+    recall_at_k: float | None
+    mrr: float | None
+    queries: list[RagEvalQueryResult]
 
 
 class RagDocumentSummary(BaseModel):

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import gc
 import json
+import re
+import time
 from pathlib import Path
 
 
@@ -24,6 +26,19 @@ import sys
 sys.path.insert(0, str(ROOT))
 from inference.router import output_suffix
 from evaluation.reports import capture_metadata, save_report
+
+# Heuristic, offline (no LLM judge) — same philosophy as the format/concision
+# checks below: cheap signal, not a substitute for the human review rubric
+# each item already carries. French + English, case-insensitive.
+REFUSAL_PATTERN = re.compile(
+    r"(je ne peux pas|je ne suis pas (?:en mesure|autoris[ée])|d[ée]sol[ée],? je ne peux|"
+    r"en tant qu['’]ia|i cannot|i can[’']?t help|i'?m not able to|as an ai)",
+    re.IGNORECASE,
+)
+
+
+def is_refusal(response: str) -> bool:
+    return bool(REFUSAL_PATTERN.search(response))
 
 
 def discover_variants(project_dir: Path) -> list[tuple[str, Path | None, str]]:
@@ -101,7 +116,7 @@ def generate(model, tokenizer, system_prompt: str, user_text: str, max_new_token
     return tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 
 
-def score(item: dict, response: str, output_mode: str = "natural") -> dict:
+def score(item: dict, response: str, output_mode: str = "natural", latency_ms: float | None = None) -> dict:
     checks = item["checks"]
     result = {
         "id": item["id"],
@@ -109,6 +124,8 @@ def score(item: dict, response: str, output_mode: str = "natural") -> dict:
         "prompt": item.get("user", ""),
         "review": item.get("review", ["Réponse correcte, utile et adaptée à la demande"]),
         "response": response,
+        "refused": is_refusal(response),
+        "latency_ms": latency_ms,
     }
 
     parsed = None
@@ -155,6 +172,13 @@ def aggregate(rows: list[dict]) -> dict:
     json_passed, json_total, json_pct = stats("json_valid")
     keys_passed, keys_total, keys_pct = stats("has_expected_keys")
     concise_passed, concise_total, concise_pct = stats("concise")
+    # "passed" here means "refused" — a high rate is bad, unlike every other
+    # *_pct field above. Named refusal_rate_pct (not refused_pct) so it reads
+    # unambiguously next to the others in a report or a regression diff.
+    refused_count, refused_total, refusal_rate_pct = stats("refused")
+
+    latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
+    latency_ms_mean = round(sum(latencies) / len(latencies), 1) if latencies else None
 
     return {
         "n": len(rows),
@@ -170,6 +194,10 @@ def aggregate(rows: list[dict]) -> dict:
         "concise_passed": concise_passed,
         "concise_total": concise_total,
         "concise_pct": concise_pct,
+        "refusal_count": refused_count,
+        "refusal_total": refused_total,
+        "refusal_rate_pct": refusal_rate_pct,
+        "latency_ms_mean": latency_ms_mean,
     }
 
 
@@ -212,8 +240,10 @@ def main() -> None:
         for item in benchmark:
             # Match the output contract used by the runtime for this project.
             item_prompt = system_prompt + output_suffix(output_mode)
+            started = time.perf_counter()
             response = generate(model, tokenizer, item_prompt, item["user"])
-            rows.append(score(item, response, output_mode=output_mode))
+            latency_ms = round((time.perf_counter() - started) * 1000, 1)
+            rows.append(score(item, response, output_mode=output_mode, latency_ms=latency_ms))
             print(f"  [{item['id']}] {response[:80]!r}")
         all_results[label] = rows
         del model
@@ -227,11 +257,15 @@ def main() -> None:
     lines.append("Automated checks measure text format and concision only. Each raw output includes an explicit human-review rubric for action clarity, feasibility and honesty. RAG grounding is not evaluated by this benchmark.\n")
 
     lines.append("## Summary\n")
-    lines.append("| Variant | n | Format texte | Concision |")
-    lines.append("|---|---|---|---|")
+    lines.append("| Variant | n | Format texte | Concision | Refus | Latence moy. |")
+    lines.append("|---|---|---|---|---|---|")
     for label, rows in all_results.items():
         agg = aggregate(rows)
-        lines.append(f"| {label} | {agg['n']} | {agg['plain_text_passed']}/{agg['plain_text_total']} | {agg['concise_passed']}/{agg['concise_total']} |")
+        latency = f"{agg['latency_ms_mean']} ms" if agg["latency_ms_mean"] is not None else "n/a"
+        lines.append(
+            f"| {label} | {agg['n']} | {agg['plain_text_passed']}/{agg['plain_text_total']} | "
+            f"{agg['concise_passed']}/{agg['concise_total']} | {agg['refusal_count']}/{agg['refusal_total']} | {latency} |"
+        )
 
     lines.append("\n## Raw outputs\n")
     for label, rows in all_results.items():
@@ -244,6 +278,9 @@ def main() -> None:
             if r["has_expected_keys"] is not None:
                 flags.append(f"expected_keys={r['has_expected_keys']}")
             flags.append(f"concise={r['concise']}")
+            flags.append(f"refused={r['refused']}")
+            if r["latency_ms"] is not None:
+                flags.append(f"latency_ms={r['latency_ms']}")
             lines.append(f"- **{r['id']}** ({r['category']}) [{', '.join(flags)}]")
             lines.append(f"  - prompt: {r['prompt']}")
             lines.append(f"  - response: `{r['response'][:300]}`")

@@ -23,9 +23,12 @@ from api.schemas import (
     RagCategory,
     RagDocumentCreate,
     RagDocumentSummary,
+    RagEvalQuery,
+    RagEvalResult,
     RagSearchRequest,
     RagSearchResult,
 )
+from rag import evaluation as rag_evaluation
 from rag import ingest
 from rag.retriever import retrieve
 
@@ -146,3 +149,41 @@ def search(body: RagSearchRequest, project: Path = Depends(project_dir)):
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     return [RagSearchResult(chunk_id=c.chunk_id, doc_id=c.doc_id, category=c.category, text=c.text, score=c.score) for c in chunks]
+
+
+@router.get("/eval-queries", response_model=list[RagEvalQuery])
+def list_eval_queries(project: Path = Depends(project_dir)):
+    return rag_evaluation.load_eval_queries(project)
+
+
+@router.post("/eval-queries", response_model=RagEvalQuery, status_code=201)
+def create_eval_query(body: RagEvalQuery, project: Path = Depends(project_dir)):
+    queries = rag_evaluation.load_eval_queries(project)
+    if any(q["id"] == body.id for q in queries):
+        raise HTTPException(409, f"la requête d'évaluation {body.id} existe déjà")
+    item = body.model_dump()
+    rag_evaluation.save_eval_queries(project, [*queries, item])
+    return item
+
+
+@router.delete("/eval-queries/{query_id}")
+def delete_eval_query(query_id: str, project: Path = Depends(project_dir)):
+    queries = rag_evaluation.load_eval_queries(project)
+    kept = [q for q in queries if q["id"] != query_id]
+    if len(kept) == len(queries):
+        raise HTTPException(404, f"requête d'évaluation inconnue : {query_id}")
+    rag_evaluation.save_eval_queries(project, kept)
+    return {"deleted": True}
+
+
+@router.post("/evaluate", response_model=RagEvalResult)
+def evaluate_retrieval(top_k: int = 5, project: Path = Depends(project_dir)):
+    """Recall@K + MRR against rag/eval_queries.jsonl, with the full retrieved
+    chunk list per query for audit (CLAUDE.md §12) — retrieval only, see
+    RagEvalResult docstring for what this doesn't cover."""
+    if not rag_evaluation.load_eval_queries(project):
+        raise HTTPException(400, "aucune requête d'évaluation — ajoute-en via POST .../rag/eval-queries")
+    try:
+        return rag_evaluation.evaluate(project, top_k=top_k)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))

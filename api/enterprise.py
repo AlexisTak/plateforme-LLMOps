@@ -191,9 +191,20 @@ class EnterpriseStore:
                 "action": "TEXT",
                 "description": "TEXT",
                 "input_schema_json": "TEXT",
+                "risk_level": "TEXT NOT NULL DEFAULT 'medium'",
             }.items():
                 if name not in columns:
                     db.execute(f"ALTER TABLE tools ADD COLUMN {name} {definition}")
+            model_version_columns = {row["name"] for row in db.execute("PRAGMA table_info(model_versions)").fetchall()}
+            for name, definition in {
+                "adapter": "TEXT",
+                "quantization": "TEXT",
+                "rag_version": "TEXT",
+                "environment": "TEXT NOT NULL DEFAULT 'local'",
+                "artifacts_json": "TEXT NOT NULL DEFAULT '{}'",
+            }.items():
+                if name not in model_version_columns:
+                    db.execute(f"ALTER TABLE model_versions ADD COLUMN {name} {definition}")
             db.executescript("""
                 CREATE INDEX IF NOT EXISTS executions_project_started ON executions(project_id, started_at DESC);
                 CREATE INDEX IF NOT EXISTS approvals_project_created ON approvals(project_id, created_at DESC);
@@ -258,16 +269,27 @@ class EnterpriseStore:
 
     def versions(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:
-            return self._rows(db.execute("SELECT * FROM model_versions WHERE project_id=? ORDER BY rowid DESC", (project_id,)).fetchall())
+            rows = self._rows(db.execute("SELECT * FROM model_versions WHERE project_id=? ORDER BY rowid DESC", (project_id,)).fetchall())
+        for row in rows:
+            row["artifacts"] = json.loads(row.pop("artifacts_json"))
+        return rows
 
     def create_version(self, project_id: str, version: str, model: str, dataset_version: str | None,
-                       benchmark_at: str | None, actor: Actor, notes: str) -> dict[str, Any]:
+                       benchmark_at: str | None, actor: Actor, notes: str, *, adapter: str | None = None,
+                       quantization: str | None = None, rag_version: str | None = None,
+                       environment: str = "local", artifacts: dict[str, Any] | None = None) -> dict[str, Any]:
         item_id = str(uuid.uuid4())
         with self._connect() as db:
             try:
-                db.execute("INSERT INTO model_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                           (item_id, project_id, version, "draft", model, dataset_version, benchmark_at,
-                            now(), actor.id, None, None, notes))
+                db.execute(
+                    "INSERT INTO model_versions "
+                    "(id,project_id,version,status,model,dataset_version,benchmark_generated_at,"
+                    "created_at,created_by,approved_at,approved_by,notes,adapter,quantization,"
+                    "rag_version,environment,artifacts_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (item_id, project_id, version, "draft", model, dataset_version, benchmark_at,
+                     now(), actor.id, None, None, notes, adapter, quantization, rag_version,
+                     environment, json.dumps(artifacts or {}, ensure_ascii=False)),
+                )
             except sqlite3.IntegrityError as exc:
                 raise HTTPException(409, f"La version {version} existe déjà") from exc
         return self.versions(project_id)[0]
@@ -293,7 +315,9 @@ class EnterpriseStore:
                 db.execute("UPDATE model_versions SET status='archived' WHERE project_id=? AND status='production'", (project_id,))
             db.execute("UPDATE model_versions SET status=?, approved_at=?, approved_by=? WHERE id=?",
                        (status, approved_at, approved_by, item_id))
-            return dict(db.execute("SELECT * FROM model_versions WHERE id=?", (item_id,)).fetchone())
+            result = dict(db.execute("SELECT * FROM model_versions WHERE id=?", (item_id,)).fetchone())
+            result["artifacts"] = json.loads(result.pop("artifacts_json"))
+            return result
 
     def quota(self, project_id: str) -> dict[str, Any]:
         with self._connect() as db:
@@ -420,12 +444,12 @@ class EnterpriseStore:
         return result
 
     def set_tool(self, project_id: str, name: str, method: str, url: str, approval_required: bool,
-                 timeout_seconds: int, max_response_bytes: int) -> dict[str, Any]:
+                 timeout_seconds: int, max_response_bytes: int, risk_level: str = "medium") -> dict[str, Any]:
         with self._connect() as db:
             existing = db.execute("SELECT id,created_at FROM tools WHERE project_id=? AND name=?", (project_id, name)).fetchone()
             tool_id, created_at = (existing["id"], existing["created_at"]) if existing else (str(uuid.uuid4()), now())
-            db.execute("INSERT INTO tools(id,project_id,name,method,url,approval_required,timeout_seconds,max_response_bytes,enabled,created_at,connector_type) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,name) DO UPDATE SET method=excluded.method,url=excluded.url,approval_required=excluded.approval_required,timeout_seconds=excluded.timeout_seconds,max_response_bytes=excluded.max_response_bytes,connector_type='http',connector_id=NULL,action=NULL,description=NULL,input_schema_json=NULL",
-                       (tool_id, project_id, name, method, url, int(approval_required), timeout_seconds, max_response_bytes, 1, created_at, "http"))
+            db.execute("INSERT INTO tools(id,project_id,name,method,url,approval_required,timeout_seconds,max_response_bytes,enabled,created_at,connector_type,risk_level) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,name) DO UPDATE SET method=excluded.method,url=excluded.url,approval_required=excluded.approval_required,timeout_seconds=excluded.timeout_seconds,max_response_bytes=excluded.max_response_bytes,connector_type='http',connector_id=NULL,action=NULL,description=NULL,input_schema_json=NULL,risk_level=excluded.risk_level",
+                       (tool_id, project_id, name, method, url, int(approval_required), timeout_seconds, max_response_bytes, 1, created_at, "http", risk_level))
             return dict(db.execute("SELECT * FROM tools WHERE id=?", (tool_id,)).fetchone())
 
     def mcp_servers(self, project_id: str) -> list[dict[str, Any]]:
@@ -519,16 +543,23 @@ class EnterpriseStore:
         denied = [item for item in matching if item["effect"] == "deny"]
         if denied:
             selected = max(denied, key=lambda item: (item["priority"], item["created_at"]))
+            result = {"effect": selected["effect"], "policy_id": selected["id"], "policy_name": selected["name"],
+                      "reason": f"Politique « {selected['name']} » (priorité {selected['priority']})"}
         elif matching:
             rank = {"allow": 0, "require_approval": 1}
             selected = max(matching, key=lambda item: (item["priority"], rank[item["effect"]], item["created_at"]))
+            result = {"effect": selected["effect"], "policy_id": selected["id"], "policy_name": selected["name"],
+                      "reason": f"Politique « {selected['name']} » (priorité {selected['priority']})"}
         else:
             effect = "require_approval" if tool["approval_required"] else "allow"
-            return {"effect": effect, "policy_id": None, "policy_name": None,
-                    "reason": "Configuration par défaut de l’outil"}
-        return {"effect": selected["effect"], "policy_id": selected["id"],
-                "policy_name": selected["name"],
-                "reason": f"Politique « {selected['name']} » (priorité {selected['priority']})"}
+            result = {"effect": effect, "policy_id": None, "policy_name": None,
+                      "reason": "Configuration par défaut de l’outil"}
+        # Defense in depth: a CRITICAL-risk tool must never run on an LLM's say-so alone, even
+        # if an "allow" policy matches — only an explicit "deny" policy can skip the approval gate.
+        if tool["risk_level"] == "critical" and result["effect"] == "allow":
+            return {**result, "effect": "require_approval",
+                    "reason": result["reason"] + " (approbation forcée : outil à risque critique)"}
+        return result
 
     def request_approval(self, project_id: str, tool_id: str, requester_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         approval_id = str(uuid.uuid4())

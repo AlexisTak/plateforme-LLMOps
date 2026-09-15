@@ -1,0 +1,13 @@
+.venv
+.git
+.pytest_cache
+.superpowers
+.playwright-mcp
+.run
+.enterprise
+projects
+web/node_modules
+web/.next
+**/__pycache__
+**/*.pyc
+docs/superpowers

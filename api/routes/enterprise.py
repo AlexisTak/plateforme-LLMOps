@@ -4,20 +4,21 @@ import json
 import os
 import hashlib
 import io
+import shutil
 import zipfile
 import re
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 import requests
 
-from api.enterprise import Actor, actor_from_request, metrics, require_role, store
+from api.enterprise import ROOT, Actor, actor_from_request, metrics, now, require_role, store
 from api.jobs import registry
 from api.mcp_client import McpError, StreamableHttpClient
-from api.paths import project_dir
-from evaluation.reports import stale_reasons
+from api.paths import PROJECTS_DIR, project_dir
+from evaluation.reports import capture_metadata, stale_reasons
 
 router = APIRouter(prefix="/api/enterprise", tags=["enterprise"])
 
@@ -25,6 +26,10 @@ router = APIRouter(prefix="/api/enterprise", tags=["enterprise"])
 class VersionCreate(BaseModel):
     version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     notes: str = Field(default="", max_length=2000)
+    adapter: str | None = Field(default=None, max_length=200)
+    quantization: str | None = Field(default=None, max_length=100)
+    rag_version: str | None = Field(default=None, max_length=200)
+    environment: str = Field(default="local", max_length=50)
 
 
 class TransitionRequest(BaseModel):
@@ -60,6 +65,9 @@ class ToolUpdate(BaseModel):
     approval_required: bool = False
     timeout_seconds: int = Field(default=5, ge=1, le=30)
     max_response_bytes: int = Field(default=100000, ge=100, le=1000000)
+    # LOW/MEDIUM/HIGH/CRITICAL per CLAUDE.md §14 — CRITICAL tools are always gated by
+    # approval in evaluate_tool_policy regardless of "allow" policies (defense in depth).
+    risk_level: str = Field(default="medium", pattern=r"^(low|medium|high|critical)$")
 
 
 class ToolExecute(BaseModel):
@@ -138,8 +146,16 @@ def create_version(body: VersionCreate, request: Request, project: Path = Depend
     benchmark_at = None
     if report_meta.exists():
         benchmark_at = json.loads(report_meta.read_text(encoding="utf-8")).get("metadata", {}).get("generated_at")
-    item = store.create_version(project.name, body.version, meta.get("inference_model") or meta["base_model"],
-                                dataset_version, benchmark_at, current, body.notes)
+    # Reuses the SHA-256 fingerprinting evaluation/reports.py already computes for staleness
+    # detection — the model registry entry gets the same provenance for free instead of a
+    # second hashing pass over the same files.
+    artifacts = {path: info for path, info in capture_metadata(project)["files"].items() if info}
+    item = store.create_version(
+        project.name, body.version, meta.get("inference_model") or meta["base_model"],
+        dataset_version, benchmark_at, current, body.notes,
+        adapter=body.adapter, quantization=body.quantization, rag_version=body.rag_version,
+        environment=body.environment, artifacts=artifacts,
+    )
     store.audit(current.id, "model.version.created", "model_version", item["id"], project.name, {"version": body.version})
     return item
 
@@ -160,6 +176,43 @@ def transition(item_id: str, body: TransitionRequest, request: Request, project:
     item = store.transition(project.name, item_id, body.status, current)
     store.audit(current.id, "model.status.changed", "model_version", item_id, project.name, {"status": body.status})
     return item
+
+
+_REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9_.\-\[\]]+)\s*==\s*([A-Za-z0-9_.\-]+)")
+
+
+def _python_dependencies() -> list[dict[str, str]]:
+    path = ROOT / "requirements.txt"
+    if not path.exists():
+        return []
+    deps = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        match = _REQUIREMENT_RE.match(line) if line and not line.startswith("#") else None
+        if match:
+            deps.append({"name": match.group(1), "version": match.group(2)})
+    return deps
+
+
+@router.get("/projects/{project_id}/registry/{item_id}/sbom")
+def registry_sbom(item_id: str, project: Path = Depends(project_dir)):
+    """Supply-chain manifest for one model registry entry (CLAUDE.md §16): what exactly
+    composed it — base model, dataset version, adapter, RAG version, artifact hashes
+    already tracked by the registry, plus the pinned Python dependency versions."""
+    item = next((v for v in store.versions(project.name) if v["id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Version de registre inconnue")
+    return {
+        "schema": "biscuits-sbom-1",
+        "generated_at": now(),
+        "project_id": project.name,
+        "model_version": {k: item[k] for k in (
+            "version", "status", "model", "dataset_version", "adapter",
+            "quantization", "rag_version", "environment", "created_at", "created_by",
+        )},
+        "artifacts": item["artifacts"],
+        "python_dependencies": _python_dependencies(),
+    }
 
 
 @router.get("/projects/{project_id}/quota")
@@ -250,6 +303,64 @@ def backup_project(request: Request, project: Path = Depends(project_dir)):
         archive.writestr(f"{project.name}/BACKUP_MANIFEST.json", json.dumps({"schema_version": 1, "files": manifest}, indent=2))
     store.audit(current.id, "project.backup.created", "project", project.name, project.name, {"files": len(files)})
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project.name}-backup.zip"'})
+
+
+PROJECT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{0,62}$")
+
+
+@router.post("/projects/{project_id}/restore", status_code=201)
+async def restore_project(project_id: str, request: Request, file: UploadFile = File(...)):
+    """Restore a backup produced by GET .../backup into a brand-new project id.
+    Never overwrites an existing project — pick an id that doesn't exist yet.
+    Every file's SHA-256 is checked against BACKUP_MANIFEST.json before being
+    written; any mismatch or path outside the target directory aborts the
+    whole restore and removes the partially-written directory (an uploaded
+    archive is untrusted input, CLAUDE.md §23)."""
+    current = actor(request)
+    require_role(current, "admin")
+    if not PROJECT_ID_PATTERN.match(project_id):
+        raise HTTPException(400, "id doit etre en minuscules, chiffres et tirets uniquement (1-63 caracteres)")
+    target = PROJECTS_DIR / project_id
+    if target.exists():
+        raise HTTPException(409, f"le projet {project_id} existe déjà — restaure sous un nouvel id")
+
+    raw = await file.read()
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "archive ZIP invalide")
+
+    manifest_names = [n for n in archive.namelist() if n.endswith("BACKUP_MANIFEST.json")]
+    if len(manifest_names) != 1:
+        raise HTTPException(400, "manifeste de sauvegarde introuvable ou ambigu dans l’archive")
+    manifest_name = manifest_names[0]
+    root_prefix = manifest_name[: -len("BACKUP_MANIFEST.json")]
+    manifest = json.loads(archive.read(manifest_name))
+    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("files"), dict):
+        raise HTTPException(400, "version de manifeste de sauvegarde non supportée")
+
+    target.mkdir(parents=True)
+    try:
+        for rel_path, expected_sha in manifest["files"].items():
+            if rel_path.startswith("/") or ".." in Path(rel_path).parts:
+                raise HTTPException(400, f"chemin suspect dans le manifeste : {rel_path}")
+            member = root_prefix + rel_path
+            if member not in archive.namelist():
+                raise HTTPException(409, f"fichier manquant dans l’archive : {rel_path}")
+            data = archive.read(member)
+            if hashlib.sha256(data).hexdigest() != expected_sha:
+                raise HTTPException(409, f"intégrité invalide pour {rel_path} — restauration annulée")
+            dest = target / rel_path
+            if target.resolve() not in dest.resolve().parents:
+                raise HTTPException(400, f"chemin suspect dans le manifeste : {rel_path}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+    except HTTPException:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+    store.audit(current.id, "project.restored", "project", project_id, project_id, {"files": len(manifest["files"])})
+    return {"restored": True, "project_id": project_id, "files": len(manifest["files"])}
 
 
 @router.get("/projects/{project_id}/executions")
@@ -389,7 +500,7 @@ def update_tool(body: ToolUpdate, request: Request, project: Path = Depends(proj
     current = actor(request)
     store.require_project_role(project.name, current, "admin")
     result = store.set_tool(project.name, body.name.strip(), body.method, _provider_url(body.url),
-                            body.approval_required, body.timeout_seconds, body.max_response_bytes)
+                            body.approval_required, body.timeout_seconds, body.max_response_bytes, body.risk_level)
     store.audit(current.id, "tool.updated", "tool", result["id"], project.name, {"name": result["name"]})
     return result
 

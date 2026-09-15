@@ -26,6 +26,24 @@ def list_experiments(project: Path = Depends(project_dir)):
     return results
 
 
+@router.get("/experiments/compare", response_model=list[ExperimentResult])
+def compare_experiments(ids: str, project: Path = Depends(project_dir)):
+    """Fetch specific experiments by id for side-by-side comparison, e.g.
+    ?ids=custom_r16,custom_r32. Declared before no route matches a plain
+    "compare" id, so this never collides with a real experiment id."""
+    wanted = [i.strip() for i in ids.split(",") if i.strip()]
+    if not wanted:
+        raise HTTPException(400, "ids ne peut pas être vide")
+    experiments_dir = project / "experiments"
+    results = []
+    for experiment_id in wanted:
+        path = experiments_dir / f"{experiment_id}.json"
+        if not path.exists():
+            raise HTTPException(404, f"experiment inconnu: {experiment_id}")
+        results.append(ExperimentResult(**json.loads(path.read_text(encoding="utf-8"))))
+    return results
+
+
 @router.get("/evaluation/report")
 def get_report(project: Path = Depends(project_dir)):
     report_path = project / "evaluation" / "report.md"

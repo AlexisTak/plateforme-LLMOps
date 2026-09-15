@@ -92,7 +92,10 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
       </Card>
       {versions.length === 0 ? <EmptyState>Aucune version enregistrée.</EmptyState> : <div className="space-y-2">{versions.map((item) => <Card key={item.id} className="flex items-center justify-between gap-4 flex-wrap">
         <div><div className="flex items-center gap-2"><span className="font-mono text-sm">v{item.version}</span><StatusBadge status={item.status} /></div><p className="text-xs text-text-muted mt-1">{item.model} · dataset {item.dataset_version || "non versionné"} · benchmark {item.benchmark_generated_at ? "présent" : "absent"}</p>{item.notes ? <p className="text-sm text-text-secondary mt-2">{item.notes}</p> : null}</div>
-        {NEXT[item.status] ? <Button disabled={busy} onClick={() => act(() => api.enterprise.transition(projectId, item.id, NEXT[item.status]!))}>{item.status === "archived" ? "Rollback en production" : `Passer à « ${NEXT[item.status]} »`}</Button> : null}
+        <div className="flex gap-2">
+          <a href={api.enterprise.sbomUrl(projectId, item.id)} download className="px-3 py-1.5 text-sm rounded-md font-medium border border-border hover:bg-surface-hover transition-colors">SBOM</a>
+          {NEXT[item.status] ? <Button disabled={busy} onClick={() => act(() => api.enterprise.transition(projectId, item.id, NEXT[item.status]!))}>{item.status === "archived" ? "Rollback en production" : `Passer à « ${NEXT[item.status]} »`}</Button> : null}
+        </div>
       </Card>)}</div>}
     </section>
 

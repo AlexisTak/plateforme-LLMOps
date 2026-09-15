@@ -278,7 +278,8 @@ export type Provider = {
   id: string; project_id: string; name: string; type: "ollama" | "openai-compatible" | "anthropic-compatible";
   base_url: string; model: string; api_key_env?: string | null; enabled: number; created_at: string;
 };
-export type ToolDefinition = { id: string; project_id: string; name: string; method: "GET" | "POST" | "MCP"; url: string; approval_required: number; timeout_seconds: number; max_response_bytes: number; enabled: number; created_at: string; connector_type?: "http" | "mcp"; connector_id?: string | null; action?: string | null; description?: string | null; input_schema?: Record<string, unknown> | null };
+export type ToolRiskLevel = "low" | "medium" | "high" | "critical";
+export type ToolDefinition = { id: string; project_id: string; name: string; method: "GET" | "POST" | "MCP"; url: string; approval_required: number; timeout_seconds: number; max_response_bytes: number; enabled: number; created_at: string; risk_level: ToolRiskLevel; connector_type?: "http" | "mcp"; connector_id?: string | null; action?: string | null; description?: string | null; input_schema?: Record<string, unknown> | null };
 export type Approval = { id: string; project_id: string; tool_id: string; tool_name: string; requester_id: string; status: "pending" | "processing" | "approved" | "denied" | "failed"; arguments: Record<string, unknown>; result?: Record<string, unknown> | null; created_at: string; decided_at?: string | null; decided_by?: string | null };
 export type ToolPolicy = { id: string; project_id: string; name: string; effect: "allow" | "deny" | "require_approval"; tool_id?: string | null; tool_name?: string | null; priority: number; enabled: number; created_at: string };
 export type McpServer = { id: string; project_id: string; name: string; url: string; api_key_env?: string | null; enabled: number; created_at: string };
@@ -484,12 +485,13 @@ export const api = {
     executions: (project: string) => request<Execution[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/executions`),
     execution: (project: string, id: string) => request<ExecutionDetail>(`/api/enterprise/projects/${encodeURIComponent(project)}/executions/${encodeURIComponent(id)}`),
     executionExportUrl: (project: string, id: string) => `${API_URL}/api/enterprise/projects/${encodeURIComponent(project)}/executions/${encodeURIComponent(id)}/export`,
+    sbomUrl: (project: string, id: string) => `${API_URL}/api/enterprise/projects/${encodeURIComponent(project)}/registry/${encodeURIComponent(id)}/sbom`,
     providers: (project: string) => request<Provider[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers`),
     updateProvider: (project: string, provider: Omit<Provider, "id" | "project_id" | "created_at" | "enabled"> & { enabled: boolean }) => request<Provider>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers`, { method: "PUT", body: JSON.stringify(provider) }),
     removeProvider: (project: string, id: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers/${encodeURIComponent(id)}`, { method: "DELETE" }),
     testProvider: (project: string, id: string) => request<{ ok: boolean; latency_ms: number; model: string }>(`/api/enterprise/projects/${encodeURIComponent(project)}/providers/${encodeURIComponent(id)}/test`, { method: "POST" }),
     tools: (project: string) => request<ToolDefinition[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools`),
-    updateTool: (project: string, tool: { name: string; method: "GET" | "POST"; url: string; approval_required: boolean; timeout_seconds: number; max_response_bytes: number }) => request<ToolDefinition>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools`, { method: "PUT", body: JSON.stringify(tool) }),
+    updateTool: (project: string, tool: { name: string; method: "GET" | "POST"; url: string; approval_required: boolean; timeout_seconds: number; max_response_bytes: number; risk_level: ToolRiskLevel }) => request<ToolDefinition>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools`, { method: "PUT", body: JSON.stringify(tool) }),
     executeTool: (project: string, id: string, args: Record<string, unknown>) => request<Record<string, unknown>>(`/api/enterprise/projects/${encodeURIComponent(project)}/tools/${encodeURIComponent(id)}/execute`, { method: "POST", body: JSON.stringify({ arguments: args }) }),
     approvals: (project: string) => request<Approval[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/approvals`),
     decideApproval: (project: string, id: string, decision: "approved" | "denied") => request<Approval>(`/api/enterprise/projects/${encodeURIComponent(project)}/approvals/${encodeURIComponent(id)}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),

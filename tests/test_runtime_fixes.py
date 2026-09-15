@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api.schemas import ChatRequest
-from evaluation.run import score, aggregate
+from evaluation.run import is_refusal, score, aggregate
 from evaluation.reports import capture_metadata, comparison, save_report, stale_reasons
 from inference.conversation import build_messages
 from inference.router import JSON_SUFFIX, PLAIN_TEXT_SUFFIX, output_suffix
@@ -83,6 +83,45 @@ def test_output_mode_supports_natural_json_and_flexible_projects():
     assert not invalid["json_valid"] and not invalid["has_expected_keys"]
 
 
+@pytest.mark.parametrize("text,refused", [
+    ("Je ne peux pas t'aider avec ça.", True),
+    ("Désolé, je ne peux pas répondre à cette demande.", True),
+    ("En tant qu'IA, je ne fournis pas ce genre de contenu.", True),
+    ("I cannot help with that request.", True),
+    ("Voici les trois étapes pour avancer.", False),
+])
+def test_refusal_detection_is_heuristic_but_catches_common_phrasing(text, refused):
+    assert is_refusal(text) is refused
+
+
+def test_score_and_aggregate_report_refusal_rate_and_latency():
+    item = {"id": "a", "category": "tasks", "review": ["ok"], "checks": {"max_chars": 200}}
+    refusing = score(item, "Je ne peux pas t'aider.", latency_ms=120.0)
+    helpful = score(item, "Voici la première étape.", latency_ms=80.0)
+    assert refusing["refused"] and not helpful["refused"]
+
+    agg = aggregate([refusing, helpful])
+    assert agg["refusal_count"] == 1
+    assert agg["refusal_total"] == 2
+    assert agg["refusal_rate_pct"] == 50.0
+    assert agg["latency_ms_mean"] == 100.0
+
+
+def test_comparison_flags_a_regression_even_when_another_metric_improves(project):
+    metadata = capture_metadata(project)
+    previous_summary = {"a": {"n": 2, "plain_text_pct": 50.0, "refusal_rate_pct": 0.0, "latency_ms_mean": 100.0}}
+    first = save_report(project, metadata, previous_summary, {"a": []}, "first")
+    # plain_text improves (+50) but refusals spike and latency doubles — a real regression on
+    # two axes that a naive "did the headline score improve" check would miss entirely.
+    new_summary = {"a": {"n": 2, "plain_text_pct": 100.0, "refusal_rate_pct": 50.0, "latency_ms_mean": 250.0}}
+    second = save_report(project, metadata, new_summary, {"a": []}, "second")
+
+    regressions = second["comparison"]["regressions"]
+    metrics_flagged = {r["metric"] for r in regressions}
+    assert "refusal_rate_pct" in metrics_flagged
+    assert "latency_ms_mean" in metrics_flagged
+    assert "plain_text_pct" not in metrics_flagged  # improved, not a regression
+    assert first["comparison"]["regressions"] == []  # nothing to compare against yet
 
 
 def test_project_creation_scaffolds_the_selected_domain(monkeypatch, tmp_path):

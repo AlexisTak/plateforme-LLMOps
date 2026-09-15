@@ -16,14 +16,16 @@ about a missing "file"/"messages" body (this happened once, see git history).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import statistics
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.enterprise import actor_from_request
 from api.paths import project_dir
 from api.schemas import (
     AddExampleRequest,
@@ -31,6 +33,8 @@ from api.schemas import (
     DatasetCategorySummary,
     DatasetExample,
     DatasetStats,
+    DatasetVersionDiff,
+    DatasetVersionManifest,
     DeduplicateResult,
     DuplicateExample,
     Message,
@@ -42,10 +46,20 @@ from api.schemas import (
     ValidationFinding,
     ValidationResult,
 )
+from scripts import dataset_versions
 from scripts import prepare_dataset as prepare_mod
 from scripts import validate_dataset as validate_mod
 
 router = APIRouter(prefix="/api/projects/{project_id}/dataset", tags=["dataset"])
+
+
+def _stable_id(obj: dict) -> str:
+    """Deterministic id for examples that never got one backfilled via the
+    dataset browsing UI (see _read_lines) — same cleaned content always
+    yields the same id, so re-running prepare() without edits produces a
+    stable diff instead of spurious add/remove churn."""
+    canonical = json.dumps(obj.get("messages", []), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 def _category_dir(project: Path, category: str) -> Path:
@@ -190,12 +204,15 @@ def validate_all(project: Path = Depends(project_dir)):
 
 
 @router.post("/prepare", response_model=PrepareDatasetResult)
-def prepare(body: PrepareDatasetRequest, project: Path = Depends(project_dir)):
+def prepare(body: PrepareDatasetRequest, request: Request, project: Path = Depends(project_dir)):
     datasets_dir = project / "datasets"
     data_dir = project / "data"
 
     raw = prepare_mod.load_all(datasets_dir)
     cleaned = [(prepare_mod.clean(obj), cat) for obj, cat in raw]
+    for obj, _cat in cleaned:
+        if not obj.get("id"):
+            obj["id"] = _stable_id(obj)
     prepare_mod.write_jsonl(data_dir / "raw" / "all.jsonl", [obj for obj, _ in cleaned])
     prepare_mod.write_jsonl(data_dir / "cleaned" / "all.jsonl", [obj for obj, _ in cleaned])
 
@@ -205,7 +222,41 @@ def prepare(body: PrepareDatasetRequest, project: Path = Depends(project_dir)):
     prepare_mod.write_jsonl(data_dir / "test" / "test.jsonl", test)
     (data_dir / "VERSION").write_text(body.version + "\n", encoding="utf-8")
 
-    return PrepareDatasetResult(version=body.version, train=len(train), validation=len(val), test=len(test))
+    actor = actor_from_request(request)
+    try:
+        manifest = dataset_versions.snapshot(project, body.version, body.seed, actor.email)
+    except dataset_versions.VersionConflictError as exc:
+        raise HTTPException(409, str(exc))
+    except dataset_versions.InvalidVersionError as exc:
+        raise HTTPException(400, str(exc))
+
+    return PrepareDatasetResult(version=body.version, train=len(train), validation=len(val), test=len(test), sha256=manifest["sha256"])
+
+
+@router.get("/versions", response_model=list[DatasetVersionManifest])
+def list_dataset_versions(project: Path = Depends(project_dir)):
+    return dataset_versions.list_versions(project)
+
+
+@router.get("/versions/{version}", response_model=DatasetVersionManifest)
+def get_dataset_version(version: str, project: Path = Depends(project_dir)):
+    try:
+        manifest = dataset_versions.get_version(project, version)
+    except dataset_versions.InvalidVersionError as exc:
+        raise HTTPException(400, str(exc))
+    if manifest is None:
+        raise HTTPException(404, f"version inconnue: {version}")
+    return manifest
+
+
+@router.get("/versions/{from_version}/diff/{to_version}", response_model=DatasetVersionDiff)
+def diff_dataset_versions(from_version: str, to_version: str, project: Path = Depends(project_dir)):
+    try:
+        return dataset_versions.diff(project, from_version, to_version)
+    except dataset_versions.InvalidVersionError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
 
 
 @router.post("/deduplicate", response_model=DeduplicateResult)

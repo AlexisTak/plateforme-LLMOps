@@ -40,6 +40,31 @@ def test_registry_happy_path(tmp_path: Path):
     assert item["status"] == "production"
 
 
+def test_registry_entry_carries_adapter_quantization_and_artifacts(tmp_path: Path):
+    control = EnterpriseStore(tmp_path / "enterprise.db")
+    actor = Actor("alice", "alice@example.test", "admin", "Alice")
+    item = control.create_version(
+        "demo", "1.0.0", "org/model", "v1", None, actor, "ready",
+        adapter="experiment_003", quantization="q4_K_M", rag_version="rag-2026-09-15",
+        environment="staging", artifacts={"models/adapters/experiment_003/adapter_model.safetensors": {"sha256": "abc"}},
+    )
+    assert item["adapter"] == "experiment_003"
+    assert item["quantization"] == "q4_K_M"
+    assert item["rag_version"] == "rag-2026-09-15"
+    assert item["environment"] == "staging"
+    assert item["artifacts"] == {"models/adapters/experiment_003/adapter_model.safetensors": {"sha256": "abc"}}
+
+    # a version created before this migration (no adapter/quantization/artifacts
+    # supplied) must still read back cleanly with sane defaults
+    bare = control.create_version("demo", "1.0.1", "org/model", "v1", None, actor, "")
+    assert bare["adapter"] is None
+    assert bare["environment"] == "local"
+    assert bare["artifacts"] == {}
+
+    listed = {v["id"]: v for v in control.versions("demo")}
+    assert listed[item["id"]]["adapter"] == "experiment_003"
+
+
 def test_local_enterprise_endpoints():
     from api.main import app
     client = TestClient(app)
@@ -151,6 +176,25 @@ def test_tool_policy_precedence_and_default(tmp_path: Path):
     assert decision["policy_id"] == denied["id"]
 
 
+def test_critical_risk_tool_is_always_gated_even_with_allow_policy(tmp_path: Path):
+    control = EnterpriseStore(tmp_path / "enterprise.db")
+    tool = control.set_tool("demo", "Drop table", "POST", "https://example.test/drop", False, 5, 1000, "critical")
+    # No policy at all: falls back to the tool's own approval_required (False here), but risk
+    # level still forces the gate — nothing critical should ever auto-execute.
+    assert control.evaluate_tool_policy("demo", tool["id"])["effect"] == "require_approval"
+
+    control.set_policy("demo", "Allow everything", "allow", tool["id"], 900, True)
+    decision = control.evaluate_tool_policy("demo", tool["id"])
+    assert decision["effect"] == "require_approval"
+    assert "risque critique" in decision["reason"]
+
+    # An explicit deny still wins over the critical-risk gate.
+    denied = control.set_policy("demo", "Block drop", "deny", tool["id"], 950, True)
+    decision = control.evaluate_tool_policy("demo", tool["id"])
+    assert decision["effect"] == "deny"
+    assert decision["policy_id"] == denied["id"]
+
+
 def test_failed_tool_execution_does_not_leave_approval_processing(tmp_path: Path):
     control = EnterpriseStore(tmp_path / "enterprise.db")
     tool = control.set_tool("demo", "Create ticket", "POST", "https://example.test/tickets", True, 5, 1000)
@@ -181,6 +225,51 @@ def test_execution_export_is_versioned_json(monkeypatch, tmp_path: Path):
     assert response.headers["content-disposition"] == 'attachment; filename="openagent-execution-run-1.json"'
 
 
+def test_registry_sbom_reports_provenance_and_dependencies(monkeypatch, tmp_path: Path):
+    from fastapi import FastAPI
+    from api.paths import project_dir
+    from api.routes import enterprise
+
+    project = tmp_path / "demo"
+    project.mkdir()
+    isolated_store = EnterpriseStore(tmp_path / "enterprise.db")
+    monkeypatch.setattr(enterprise, "store", isolated_store)
+    actor = Actor("alice", "alice@example.test", "admin", "Alice")
+    item = isolated_store.create_version(
+        "demo", "1.0.0", "org/model", "v1", None, actor, "ready",
+        adapter="experiment_003", artifacts={"models/adapters/experiment_003/adapter_model.safetensors": {"sha256": "abc"}},
+    )
+    monkeypatch.setattr(enterprise, "ROOT", tmp_path)
+    (tmp_path / "requirements.txt").write_text("# comment\ntorch==2.5.0\ninvalid-line-without-pin\nfastapi==0.115.0\n", encoding="utf-8")
+
+    app = FastAPI()
+    app.include_router(enterprise.router)
+    app.dependency_overrides[project_dir] = lambda: project
+    response = TestClient(app).get(f"/api/enterprise/projects/demo/registry/{item['id']}/sbom")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["schema"] == "biscuits-sbom-1"
+    assert body["model_version"]["adapter"] == "experiment_003"
+    assert body["artifacts"] == item["artifacts"]
+    assert {"name": "torch", "version": "2.5.0"} in body["python_dependencies"]
+    assert len(body["python_dependencies"]) == 2
+
+
+def test_registry_sbom_404_for_unknown_version(monkeypatch, tmp_path: Path):
+    from fastapi import FastAPI
+    from api.paths import project_dir
+    from api.routes import enterprise
+
+    project = tmp_path / "demo"
+    project.mkdir()
+    monkeypatch.setattr(enterprise, "store", EnterpriseStore(tmp_path / "enterprise.db"))
+    app = FastAPI()
+    app.include_router(enterprise.router)
+    app.dependency_overrides[project_dir] = lambda: project
+    response = TestClient(app).get("/api/enterprise/projects/demo/registry/nope/sbom")
+    assert response.status_code == 404
+
+
 def test_mcp_sync_imports_only_declared_read_only_tools(tmp_path: Path):
     control = EnterpriseStore(tmp_path / "enterprise.db")
     server = control.set_mcp_server("demo", "Issues", "https://mcp.example.test/mcp", "MCP_KEY", True)
@@ -204,3 +293,85 @@ def test_mcp_sync_disables_tools_removed_upstream(tmp_path: Path):
     control.sync_mcp_tools("demo", server["id"], [])
     tool = next(item for item in control.tools("demo") if item["id"] == imported[0]["id"])
     assert tool["enabled"] == 0
+
+
+def _restore_client(monkeypatch, tmp_path: Path, source: Path) -> tuple[TestClient, Path]:
+    from fastapi import FastAPI
+    from api.paths import project_dir
+    from api.routes import enterprise
+
+    projects_root = tmp_path / "projects_root"
+    projects_root.mkdir()
+    monkeypatch.setattr(enterprise, "PROJECTS_DIR", projects_root)
+
+    app = FastAPI()
+    app.include_router(enterprise.router)
+    app.dependency_overrides[project_dir] = lambda: source
+    return TestClient(app), projects_root
+
+
+def test_backup_restore_round_trip_preserves_files(monkeypatch, tmp_path: Path):
+    source = tmp_path / "source"
+    (source / "datasets" / "core").mkdir(parents=True)
+    (source / "datasets" / "core" / "a.jsonl").write_text('{"id":"1","messages":[]}\n', encoding="utf-8")
+    (source / "meta.json").write_text('{"id": "source"}', encoding="utf-8")
+
+    client, projects_root = _restore_client(monkeypatch, tmp_path, source)
+
+    backup = client.get("/api/enterprise/projects/source/backup")
+    assert backup.status_code == 200
+
+    restored = client.post(
+        "/api/enterprise/projects/restored-copy/restore",
+        files={"file": ("backup.zip", backup.content, "application/zip")},
+    )
+    assert restored.status_code == 201
+    assert restored.json() == {"restored": True, "project_id": "restored-copy", "files": 2}
+
+    restored_file = projects_root / "restored-copy" / "datasets" / "core" / "a.jsonl"
+    assert restored_file.read_text(encoding="utf-8") == (source / "datasets" / "core" / "a.jsonl").read_text(encoding="utf-8")
+    assert (projects_root / "restored-copy" / "meta.json").exists()
+
+
+def test_restore_refuses_to_overwrite_an_existing_project(monkeypatch, tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "meta.json").write_text('{"id": "source"}', encoding="utf-8")
+    client, projects_root = _restore_client(monkeypatch, tmp_path, source)
+    backup = client.get("/api/enterprise/projects/source/backup")
+
+    (projects_root / "already-there").mkdir()
+    response = client.post(
+        "/api/enterprise/projects/already-there/restore",
+        files={"file": ("backup.zip", backup.content, "application/zip")},
+    )
+    assert response.status_code == 409
+    assert not (projects_root / "already-there" / "meta.json").exists()
+
+
+def test_restore_rejects_tampered_archive_and_cleans_up(monkeypatch, tmp_path: Path):
+    import io
+    import json
+    import zipfile
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "meta.json").write_text('{"id": "source"}', encoding="utf-8")
+    client, projects_root = _restore_client(monkeypatch, tmp_path, source)
+    backup = client.get("/api/enterprise/projects/source/backup")
+
+    original = zipfile.ZipFile(io.BytesIO(backup.content))
+    tampered = io.BytesIO()
+    with zipfile.ZipFile(tampered, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in original.namelist():
+            data = original.read(name)
+            if name.endswith("meta.json") and not name.endswith("BACKUP_MANIFEST.json"):
+                data = b'{"id": "tampered"}'
+            archive.writestr(name, data)
+
+    response = client.post(
+        "/api/enterprise/projects/tampered-copy/restore",
+        files={"file": ("backup.zip", tampered.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 409
+    assert not (projects_root / "tampered-copy").exists()

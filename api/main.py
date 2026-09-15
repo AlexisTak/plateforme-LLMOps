@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from api.jobs import registry
 
 from api.enterprise import actor_from_request, metrics, require_role, store
+from api.paths import PROJECTS_DIR
 from api.routes import chat, dataset, enterprise, evaluation, experiments, jobs, opportunities, projects, rag, system, training
 
 @asynccontextmanager
@@ -91,4 +92,21 @@ app.include_router(opportunities.router)
 
 @app.get("/api/health")
 def health():
+    """Liveness — the process is up and answering HTTP. Never checks
+    dependencies, see /api/ready for that."""
     return {"status": "ok"}
+
+
+@app.get("/api/ready")
+def ready():
+    """Readiness — the control plane's own dependencies (SQLite store, the
+    projects/ directory) are actually reachable. Used by docker-compose's
+    healthcheck so the web container waits for a genuinely usable API,
+    not just a process that has started."""
+    if not PROJECTS_DIR.is_dir():
+        raise HTTPException(503, "projects directory unavailable")
+    try:
+        store.audits(limit=1)
+    except Exception as exc:
+        raise HTTPException(503, f"enterprise database unavailable: {exc}")
+    return {"status": "ready"}
