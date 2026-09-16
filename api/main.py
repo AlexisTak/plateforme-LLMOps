@@ -77,6 +77,27 @@ async def observability_and_audit(request, call_next):
             logging.getLogger(__name__).exception("Impossible d’écrire l’audit")
     return response
 
+class ApiV1AliasMiddleware:
+    """/api/v1/* mirrors /api/* byte-for-byte — a stable prefix external SDKs and
+    integrations can pin against (CLAUDE.md §18) without us maintaining two parallel
+    implementations. Runs before routing, so every current and future /api/* endpoint
+    is reachable under /api/v1/* automatically.
+    ponytail: alias only, no independent v1/v2 behavior yet — split into real per-version
+    routers the day an endpoint actually needs to behave differently across versions.
+    Known limitation: the OpenAPI schema still lists paths under /api/*, not /api/v1/*,
+    since this rewrite happens below FastAPI's routing/schema layer."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith("/api/v1/"):
+            scope = {**scope, "path": "/api/" + scope["path"][len("/api/v1/"):]}
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(ApiV1AliasMiddleware)
+
 app.include_router(dataset.router)
 app.include_router(experiments.router)
 app.include_router(training.router)

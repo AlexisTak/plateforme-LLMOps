@@ -187,6 +187,10 @@ def upsert_kpi(opportunity_id: str, body: KpiUpsert, request: Request):
 def analyze_opportunity(opportunity_id: str, body: AnalyzeRequest, request: Request):
     current = actor_from_request(request)
     require_role(current, "operator")
+    # Opportunities themselves are global, but this call spends body.project_id's configured
+    # AI provider (and its referenced secret) — an operator on some other project must not be
+    # able to borrow a project they aren't a member of just by naming its id in the body.
+    store.require_project_role(body.project_id, current, "operator")
     opportunity = _require_opportunity(opportunity_id)
     provider = next((p for p in store.providers(body.project_id) if p["id"] == body.provider_id), None)
     if not provider:

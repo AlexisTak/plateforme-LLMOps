@@ -88,13 +88,54 @@ outils et supply chain » du README) :
 - **ABAC fin** (conditions par attribut au-delà de outil/politique/risque) :
   aucun besoin concret identifié au-delà de ce que `tool_policies` couvre déjà.
 
+## Ecosystem (lot 4, 2026-09-16)
+
+- **API v1** : `/api/v1/*` reflète `/api/*` via une réécriture de chemin ASGI
+  (`api/main.py::ApiV1AliasMiddleware`) exécutée avant le routage — aucun
+  endpoint dupliqué, tout endpoint futur est automatiquement disponible sous
+  les deux préfixes. `/api/*` reste inchangé (contrat préservé pour la
+  console web). Limite documentée dans le README : le schéma OpenAPI garde
+  la forme `/api/*`.
+- **SDK Python / TypeScript** : pas de package maintenu à la main — le schéma
+  OpenAPI déjà exposé permet la génération d'un client typé avec un outil
+  standard. `sdk/python/quickstart.py` et `sdk/typescript/quickstart.ts`
+  couvrent la seule partie non déductible par génération : le contrat des
+  en-têtes d'authentification. Testés en conditions réelles contre un serveur
+  local (`uvicorn` + script), pas seulement en `pytest`.
+- **Intégrations Hermes / SWEET / Anti-Pépins** : non implémentées, faute de
+  toute spécification d'API pour ces produits dans ce dépôt — en fabriquer une
+  serait de la pure invention. Documenté comme bloqué dans le README plutôt
+  que silencieusement ignoré.
+
+### Corrections de sécurité (revue automatique post-commit/push)
+
+Deux failles réelles remontées par la revue de sécurité automatique ont été
+corrigées avant la suite du lot 4, tests de non-régression inclus :
+
+- **Path traversal** — `GET .../experiments/compare?ids=...`
+  (`api/routes/experiments.py`) construisait un chemin fichier directement à
+  partir d'`ids`, sans validation. Corrigé par un motif regex sur l'identifiant
+  (même motif que `scripts/dataset_versions.py::_SAFE_VERSION`) plus une
+  vérification que le chemin résolu reste dans `experiments/` (défense en
+  profondeur, même schéma que `restore_project`).
+- **Contournement d'isolation entre projets** —
+  `POST .../opportunities/{id}/analyze` (`api/routes/opportunities.py`)
+  n'exigeait qu'un rôle global `operator`, jamais une appartenance au projet
+  ciblé par `project_id` dans le corps de la requête, alors que cet endpoint
+  utilise le fournisseur IA (et le secret référencé) de ce projet. Un
+  opérateur d'un projet A pouvait ainsi consommer le fournisseur d'un projet B
+  dont il n'est pas membre. Corrigé en ajoutant
+  `store.require_project_role(body.project_id, current, "operator")` avant
+  tout accès aux données du projet ciblé.
+
 ## Prochain lot prioritaire
 
-4. Ecosystem : API v1 versionnée, SDK Python, SDK TypeScript.
-
-Reporté (priorité basse, cf. gap analysis du lot 1) : Model Playground
-(comparaison A/B/Production dans le chat) et OpenTelemetry — l'observabilité
-RED + correlation ID + traces d'exécution déjà en place couvre le besoin MVP.
+Aucun — les 4 lots de la feuille de route (CLAUDE.md §28) sont couverts, dans
+les limites explicitement documentées ci-dessus à chaque étape. Prochaines
+étapes envisageables uniquement si un besoin concret apparaît : Model
+Playground, OpenTelemetry, multi-tenant Organization/Workspace, client OIDC,
+provider Vault/Keyring, intégrations Hermes/SWEET/Anti-Pépins dès que leurs
+spécifications existeront.
 
 Les politiques prévues concernent les permissions d'accès et l'exécution des
 outils. Aucun contrôle de contenu médical n'est réintroduit.

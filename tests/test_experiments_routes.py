@@ -69,3 +69,16 @@ def test_compare_empty_ids_is_400(tmp_path: Path):
     client = _client(project)
     response = client.get("/api/projects/demo/experiments/compare", params={"ids": ""})
     assert response.status_code == 400
+
+
+def test_compare_rejects_path_traversal_ids(tmp_path: Path):
+    # A secret file outside this project's experiments/ dir that a traversal id would reach.
+    secret = tmp_path / "secret.json"
+    secret.write_text(json.dumps(_result("secret", 0.1)), encoding="utf-8")
+    project = tmp_path / "demo"
+    (project / "experiments").mkdir(parents=True)
+
+    client = _client(project)
+    for traversal_id in ("../secret", "..%2Fsecret", "/etc/passwd", "a/../../secret"):
+        response = client.get("/api/projects/demo/experiments/compare", params={"ids": traversal_id})
+        assert response.status_code == 400, traversal_id

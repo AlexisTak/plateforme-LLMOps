@@ -62,6 +62,27 @@ def test_analyze_requires_known_provider():
     assert response.status_code == 404
 
 
+def test_analyze_rejects_project_the_actor_is_not_a_member_of(monkeypatch):
+    """Opportunities are global, but analyze() spends the named project's AI provider (and
+    its referenced secret) — an operator must be a member of that specific project, not just
+    an operator somewhere, or they could borrow any other project's provider by naming it."""
+    from api.enterprise import store as enterprise_store
+
+    monkeypatch.setenv("BISCUITS_AUTH_MODE", "proxy")
+    monkeypatch.setenv("BISCUITS_PROXY_SECRET", "test-secret")
+    client = TestClient(app)
+    headers = {
+        "x-biscuits-proxy-secret": "test-secret", "x-biscuits-user-id": "operator-1",
+        "x-biscuits-user-email": "operator@example.test", "x-biscuits-role": "operator",
+    }
+    enterprise_store.set_member("own-project-regression-test", "operator-1", "operator@example.test", "Operator", "operator")
+
+    opportunity_id = client.get("/api/opportunities", headers=headers).json()[0]["id"]
+    response = client.post(f"/api/opportunities/{opportunity_id}/analyze", headers=headers,
+                            json={"project_id": "other-project-regression-test", "provider_id": "whatever"})
+    assert response.status_code == 403
+
+
 def test_analyze_returns_502_on_malformed_llm_response(monkeypatch):
     client = TestClient(app)
     provider = client.put("/api/enterprise/projects/assistant/providers", json={

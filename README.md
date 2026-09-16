@@ -293,6 +293,32 @@ ne sert qu'à démontrer et faire tourner le plan de contrôle de façon
 reproductible. `./start.sh` / `./start.ps1` restent le chemin principal pour le
 développement local et ne changent pas.
 
+## API versionnée et SDKs
+
+Tous les endpoints existants (`/api/...`) restent inchangés et continuent de
+fonctionner tels quels. En plus de cela, `/api/v1/...` reflète exactement la
+même surface (`api/main.py::ApiV1AliasMiddleware`, une réécriture de chemin
+qui s'exécute avant le routage) — un préfixe stable sur lequel un outil ou un
+script externe peut s'appuyer sans dépendre des chemins internes utilisés par
+la console web. Limite connue : le schéma OpenAPI (`/openapi.json`) liste
+encore les chemins sous leur forme `/api/...`, pas `/api/v1/...`, puisque la
+réécriture se fait en dessous de la couche de routage/schéma de FastAPI.
+
+Il n'y a pas de SDK Python ou TypeScript maintenu à la main dans ce dépôt : le
+schéma OpenAPI existant permet déjà de générer un client typé avec un outil
+standard (`openapi-python-client`, `openapi-typescript`…), sans dupliquer et
+faire dériver une deuxième implémentation. `sdk/python/quickstart.py` et
+`sdk/typescript/quickstart.ts` montrent la seule chose que la génération ne
+peut pas déduire : le contrat des en-têtes d'authentification
+(`api/enterprise.py::actor_from_request`) — le reste s'obtient par génération.
+
+Les intégrations Hermes, SWEET et Anti-Pépins listées dans la feuille de route
+(CLAUDE.md §28) ne sont pas implémentées : aucun contrat d'API pour ces
+produits n'existe dans ce dépôt, et en fabriquer un serait de la pure
+supposition. À reprendre en tant qu'adaptateurs sous `integrations/` dès
+qu'une spécification réelle (endpoints, auth, schéma de données) sera
+disponible.
+
 ## Status
 
 Work-in-progress. See [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) for the current audit and [docs/DATASET_GUIDELINES.md](docs/DATASET_GUIDELINES.md) for dataset rules.
