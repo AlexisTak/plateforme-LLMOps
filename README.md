@@ -1,9 +1,10 @@
 # OpenAgent
 
-La spécification produit de référence est
-[`Cahier_des_charges_OpenAgent_Enterprise.docx`](Cahier_des_charges_OpenAgent_Enterprise.docx).
+La spécification produit de référence est [`CLAUDE.md`](CLAUDE.md).
 La couverture exigence par exigence et les prochains lots sont suivis dans
-[`docs/OPENAGENT_SPEC_MAPPING.md`](docs/OPENAGENT_SPEC_MAPPING.md).
+[`docs/OPENAGENT_SPEC_MAPPING.md`](docs/OPENAGENT_SPEC_MAPPING.md). Les
+décisions d'architecture structurantes sont documentées dans
+[`docs/adr/`](docs/adr/README.md).
 
 Les changements récents du chat, de l'évaluation et des jobs sont décrits dans
 [docs/RUNTIME_FIXES.md](docs/RUNTIME_FIXES.md). Les rapports historiques JSON
