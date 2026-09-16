@@ -128,9 +128,12 @@ corrigées avant la suite du lot 4, tests de non-régression inclus :
   `store.require_project_role(body.project_id, current, "operator")` avant
   tout accès aux données du projet ciblé.
 
-Audit de suivi (autonome, même classe de vulnérabilités) sur le reste des
-routes — deux failles pré-existantes supplémentaires trouvées et corrigées,
-non signalées par la revue automatique mais du même type que ci-dessus :
+Audit de suivi (autonome, même classe de vulnérabilités puis §23 plus
+largement) sur le reste des routes — quatre failles pré-existantes
+supplémentaires trouvées et corrigées, non signalées par la revue automatique.
+Le motif de validation appliqué aux trois failles de path traversal est
+documenté comme convention durable dans
+[ADR-0007](adr/0007-filesystem-identifier-validation-pattern.md) :
 
 - **Path traversal sur la catégorie de dataset** —
   `GET/POST/PUT/DELETE .../dataset/{category}...` (`api/routes/dataset.py`)

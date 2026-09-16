@@ -69,7 +69,7 @@ export default function DocsPage() {
     <div className="space-y-10">
       <PageHeader
         title="Documentation"
-        description="Comprendre ce que fait OpenAgent, comment utiliser chaque écran et à quoi correspondent les termes techniques."
+        description="Comprendre ce que fait OpenModels, comment utiliser chaque écran et à quoi correspondent les termes techniques."
       />
 
       <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
