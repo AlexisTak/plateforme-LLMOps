@@ -173,9 +173,7 @@ def create_project(body: CreateProjectRequest, request: Request = None):
 
 @router.delete("/{project_id}")
 def delete_project(project_id: str):
-    path = PROJECTS_DIR / project_id
-    if not path.exists() or not (path / "meta.json").exists():
-        raise HTTPException(404, f"unknown project: {project_id}")
+    path = project_dir(project_id)
 
     dataset_examples, rag_documents, experiment_count = _counts(path)
     if dataset_examples or rag_documents or experiment_count:

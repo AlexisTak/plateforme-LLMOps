@@ -128,6 +128,54 @@ corrigées avant la suite du lot 4, tests de non-régression inclus :
   `store.require_project_role(body.project_id, current, "operator")` avant
   tout accès aux données du projet ciblé.
 
+Audit de suivi (autonome, même classe de vulnérabilités) sur le reste des
+routes — deux failles pré-existantes supplémentaires trouvées et corrigées,
+non signalées par la revue automatique mais du même type que ci-dessus :
+
+- **Path traversal sur la catégorie de dataset** —
+  `GET/POST/PUT/DELETE .../dataset/{category}...` (`api/routes/dataset.py`)
+  ne validait `category` que par `path.exists()`, sans motif ni vérification
+  de confinement : `category=../../../etc` (ou toute autre valeur qui résout
+  hors de `datasets/`) permettait de lire, écrire ou supprimer des fichiers
+  `*.jsonl` en dehors du projet. Corrigé par le même motif que les autres
+  identifiants filesystem de ce dépôt (`_SAFE_CATEGORY`) plus une vérification
+  que le chemin résolu reste dans `datasets/`.
+- **Path traversal sur la config d'entraînement** —
+  `POST .../training/start` et `.../training/pipeline`
+  (`StartTrainingRequest`/`StartPipelineRequest.config_filename`) étaient un
+  `str` sans validation, concaténé dans un chemin puis passé tel quel à un
+  sous-processus d'entraînement réel (`training/scripts/train.py`,
+  `scripts/run_pipeline.py`). Corrigé par une contrainte `Field(pattern=...)`
+  au niveau du schéma Pydantic — la valeur ne peut plus contenir `/` du tout,
+  fermant la faille avant même d'atteindre `api/jobs.py`.
+- **Path traversal sur `project_id`, y compris sur `DELETE` (`shutil.rmtree`)** —
+  `api/paths.py::project_dir`, la dépendance partagée par quasiment toutes les
+  routes de projet (dataset, RAG, training, evaluation, chat, enterprise,
+  experiments…), ne validait `project_id` que par `path.exists()`. Un segment
+  d'URL unique décodé en `..` (`%2e%2e`, atteignable car Starlette route sur
+  le chemin brut mais décode chaque segment individuellement — un `/` littéral
+  ou encodé change le nombre de segments et ne traverse donc pas ce chemin)
+  atteignait le handler. Plus grave : `DELETE .../projects/{project_id}`
+  dupliquait le même join non validé (`PROJECTS_DIR / project_id`) au lieu de
+  réutiliser `project_dir()`, juste avant un `shutil.rmtree()` — une écriture
+  destructive. Corrigé par le même motif que les autres identifiants de ce
+  dépôt (`_SAFE_PROJECT_ID`, identique au `ID_PATTERN` déjà appliqué à la
+  création de projet) plus une vérification de confinement dans
+  `project_dir()`, et en faisant réutiliser cette dépendance par
+  `delete_project` au lieu de dupliquer la logique.
+- **Déni de service par expansion d'entités XML (« billion laughs ») sur les
+  DOCX importés** — `rag/ingest.py::_extract_docx_text` parsait
+  `word/document.xml` d'un `.docx` envoyé par l'utilisateur
+  (`POST .../rag/documents/upload`) avec `xml.etree.ElementTree`, qui résout
+  les entités internes déclarées en DTD ; confirmé en pratique qu'une entité
+  personnalisée est bien résolue à l'analyse. Un DOCX conçu avec un
+  `<!DOCTYPE>` à entités récursives (« billion laughs ») pouvait donc épuiser
+  la mémoire/CPU du serveur au moment de l'import — un document malveillant au
+  sens de CLAUDE.md §23. Corrigé en rejetant tout DOCX dont le XML contient un
+  `<!DOCTYPE` avant analyse (un vrai `word/document.xml` n'en déclare jamais) —
+  ferme à la fois ce vecteur et l'injection d'entité externe (XXE), sans
+  ajouter de dépendance de parseur XML durci.
+
 ## Prochain lot prioritaire
 
 Aucun — les 4 lots de la feuille de route (CLAUDE.md §28) sont couverts, dans

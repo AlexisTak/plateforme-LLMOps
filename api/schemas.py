@@ -165,13 +165,19 @@ class TrainingConfigSummary(BaseModel):
     has_result: bool
 
 
+# Same filename-safe charset as PrepareDatasetRequest.version below — config_filename is
+# joined onto a filesystem path (api/routes/training.py, api/jobs.py) and passed straight to
+# a training subprocess, so it must never contain "/", "..", or other traversal characters.
+_SAFE_CONFIG_FILENAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.yaml$"
+
+
 class StartTrainingRequest(BaseModel):
-    config_filename: str
+    config_filename: str = Field(pattern=_SAFE_CONFIG_FILENAME)
     resume: bool = False
 
 
 class StartPipelineRequest(BaseModel):
-    config_filename: str
+    config_filename: str = Field(pattern=_SAFE_CONFIG_FILENAME)
     dataset_version: str
     resume: bool = False
 

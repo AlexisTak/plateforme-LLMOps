@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import statistics
 import uuid
 from pathlib import Path
@@ -62,9 +63,18 @@ def _stable_id(obj: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
+# Categories are dynamic directory names under datasets/ (no fixed enum, see /categories),
+# but they're still joined onto a filesystem path and used for read/write/delete below — must
+# never contain "/", "..", or other path-traversal characters.
+_SAFE_CATEGORY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 def _category_dir(project: Path, category: str) -> Path:
-    path = project / "datasets" / category
-    if not path.exists() or not path.is_dir():
+    if not _SAFE_CATEGORY.match(category):
+        raise HTTPException(404, f"unknown category: {category}")
+    datasets_dir = (project / "datasets").resolve()
+    path = (datasets_dir / category).resolve()
+    if datasets_dir not in path.parents or not path.exists() or not path.is_dir():
         raise HTTPException(404, f"unknown category: {category}")
     return path
 

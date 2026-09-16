@@ -81,6 +81,13 @@ def _extract_docx_text(raw: bytes) -> str:
             xml = archive.read("word/document.xml")
     except (zipfile.BadZipFile, KeyError) as exc:
         raise IngestError(f"could not read DOCX: {exc}") from exc
+    # stdlib ElementTree expands DTD-defined internal entities (confirmed: a
+    # crafted <!ENTITY> is resolved during parsing), making it vulnerable to a
+    # "billion laughs" exponential entity-expansion DoS on untrusted input. A
+    # real Word document.xml never declares a DOCTYPE, so rejecting one closes
+    # the vector without adding a hardened-XML-parser dependency.
+    if b"<!DOCTYPE" in xml.upper():
+        raise IngestError("DOCX contains a DOCTYPE declaration, which is not a valid Word document")
     try:
         root = ElementTree.fromstring(xml)
     except ElementTree.ParseError as exc:
