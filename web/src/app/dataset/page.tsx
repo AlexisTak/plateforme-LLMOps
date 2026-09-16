@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetExample, Message, ValidationResult, DatasetStats } from "@/lib/api";
-import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, SectionTitle, Skeleton, Textarea } from "@/components/ui";
+import { api, CurrentDatasetVersion, DatasetCategorySummary, DatasetExample, DatasetVersionDiff, DatasetVersionManifest, Message, ValidationResult, DatasetStats } from "@/lib/api";
+import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
 import { BarChart } from "@/components/bar-chart";
 import { useProject } from "@/lib/project-context";
 import { useAction } from "@/lib/use-action";
@@ -23,6 +23,10 @@ export default function DatasetPage() {
   const [pendingDedup, setPendingDedup] = useState<{ count: number; sample: string; more: string; total: number } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DatasetExample | null>(null);
   const [currentVersion, setCurrentVersion] = useState<CurrentDatasetVersion | null>(null);
+  const [versions, setVersions] = useState<DatasetVersionManifest[]>([]);
+  const [diffFrom, setDiffFrom] = useState("");
+  const [diffTo, setDiffTo] = useState("");
+  const [diff, setDiff] = useState<DatasetVersionDiff | null>(null);
   const [query, setQuery] = useState("");
   const [addingNew, setAddingNew] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -41,9 +45,22 @@ export default function DatasetPage() {
     api.dataset.currentVersion(projectId).then(setCurrentVersion);
   };
 
+  const refreshVersions = () => {
+    if (!projectId) return;
+    api.dataset.versions(projectId).then((next) => {
+      // oldest first — default the diff picker to the two most recent versions.
+      setVersions(next);
+      if (next.length >= 2) {
+        setDiffFrom(next[next.length - 2].version);
+        setDiffTo(next[next.length - 1].version);
+      }
+    });
+  };
+
   useEffect(() => {
     refreshCategories();
     refreshVersion();
+    refreshVersions();
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -65,7 +82,15 @@ export default function DatasetPage() {
     if (res) {
       setPrepareResult(`${res.version} — train ${res.train} · validation ${res.validation} · test ${res.test}`);
       refreshVersion();
+      refreshVersions();
     }
+  };
+
+  const diffAction = useAction(() => api.dataset.versionDiff(projectId!, diffFrom, diffTo));
+  const runDiff = async () => {
+    if (!projectId || !diffFrom || !diffTo) return;
+    const res = await diffAction.run();
+    if (res) setDiff(res);
   };
 
   const deduplicateAction = useAction((dryRun: boolean) => api.dataset.deduplicate(projectId!, dryRun));
@@ -305,6 +330,56 @@ export default function DatasetPage() {
           {prepareResult && <span className="text-sm text-text-secondary font-mono">{prepareResult}</span>}
         </div>
       </section>
+
+      {versions.length > 0 && (
+        <section className="border-t border-border pt-6">
+          <SectionTitle>Historique des versions</SectionTitle>
+          <div className="space-y-1.5 mb-4">
+            {[...versions].reverse().map((v) => (
+              <div key={v.version} className="flex items-center justify-between text-sm px-3 py-2 rounded-md bg-surface border border-border">
+                <span className="font-mono text-text-primary">{v.version}</span>
+                <span className="text-text-muted text-xs">
+                  {v.example_count} exemples · {v.author} · {new Date(v.created_at).toLocaleString("fr-FR")} · <span className="font-mono">{v.sha256.slice(0, 12)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {versions.length >= 2 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Select value={diffFrom} onChange={setDiffFrom}>
+                  {versions.map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
+                </Select>
+                <span className="text-text-muted text-sm">→</span>
+                <Select value={diffTo} onChange={setDiffTo}>
+                  {versions.map((v) => <option key={v.version} value={v.version}>{v.version}</option>)}
+                </Select>
+                <Button onClick={runDiff} disabled={diffAction.busy || diffFrom === diffTo}>
+                  Voir le diff
+                </Button>
+              </div>
+              {diffAction.error && <p className="text-error text-xs">{diffAction.error}</p>}
+              {diff && (
+                <Card className="space-y-2 text-sm">
+                  <p className="text-text-secondary">
+                    <span className="text-success font-medium">+{diff.added.length}</span> ajoutés ·{" "}
+                    <span className="text-error font-medium">−{diff.removed.length}</span> supprimés ·{" "}
+                    <span className="text-accent font-medium">~{diff.modified.length}</span> modifiés
+                  </p>
+                  {[...diff.added.map((e) => ({ ...e, kind: "+" as const })), ...diff.removed.map((e) => ({ ...e, kind: "−" as const })), ...diff.modified.map((e) => ({ ...e, kind: "~" as const }))]
+                    .slice(0, 50)
+                    .map((e, i) => (
+                      <p key={i} className="font-mono text-xs text-text-muted">
+                        {e.kind} [{e.split}] {e.summary}
+                      </p>
+                    ))}
+                </Card>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <ConfirmDialog
         open={!!pendingDedup}

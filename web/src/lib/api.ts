@@ -64,6 +64,9 @@ export type DeduplicateResult = {
   duplicates: DuplicateExample[];
 };
 export type CurrentDatasetVersion = { version: string | null; train: number; validation: number; test: number };
+export type DatasetVersionManifest = { version: string; dataset: string; author: string; created_at: string; splits: Record<string, number>; example_count: number; sha256: string; seed: number };
+export type DatasetVersionDiffEntry = { split: string; id: string; summary: string };
+export type DatasetVersionDiff = { from_version: string; to_version: string; added: DatasetVersionDiffEntry[]; removed: DatasetVersionDiffEntry[]; modified: DatasetVersionDiffEntry[] };
 
 export type EvalSummaryMetric = {
   n: number;
@@ -175,6 +178,10 @@ export type CreateProjectParams = {
 export type RagCategory = "methods" | "research" | "product" | "other";
 export const RAG_CATEGORIES: RagCategory[] = ["methods", "research", "product", "other"];
 export type RagSearchResult = { chunk_id: string; doc_id: string; category: string; text: string; score: number };
+export type RagEvalQuery = { id: string; query: string; relevant_doc_ids: string[] };
+export type RagEvalQueryChunk = { chunk_id: string; doc_id: string; category: string; score: number; text: string };
+export type RagEvalQueryResult = { id: string; query: string; relevant_doc_ids: string[]; hit: boolean; rank: number | null; chunks: RagEvalQueryChunk[] };
+export type RagEvalResult = { top_k: number; n_queries: number; recall_at_k: number | null; mrr: number | null; queries: RagEvalQueryResult[] };
 export type RagDocument = {
   filename: string;
   category: string;
@@ -364,10 +371,15 @@ export const api = {
     deduplicate: (project: string, dryRun = true) =>
       request<DeduplicateResult>(`${p(project)}/dataset/deduplicate?dry_run=${dryRun}`, { method: "POST" }),
     currentVersion: (project: string) => request<CurrentDatasetVersion>(`${p(project)}/dataset/meta/version`),
+    versions: (project: string) => request<DatasetVersionManifest[]>(`${p(project)}/dataset/versions`),
+    versionDiff: (project: string, from: string, to: string) =>
+      request<DatasetVersionDiff>(`${p(project)}/dataset/versions/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}`),
   },
 
   experiments: {
     list: (project: string) => request<ExperimentResult[]>(`${p(project)}/experiments`),
+    compare: (project: string, ids: string[]) =>
+      request<ExperimentResult[]>(`${p(project)}/experiments/compare?ids=${encodeURIComponent(ids.join(","))}`),
     report: (project: string) => request<EvaluationReport>(`${p(project)}/evaluation/report`),
     reportSummary: (project: string) => request<Record<string, EvalSummaryMetric>>(`${p(project)}/evaluation/report/summary`),
   },
@@ -466,6 +478,13 @@ export const api = {
         { method: "DELETE" }
       ),
     reindex: (project: string) => request<JobStatus>(`${p(project)}/rag/reindex`, { method: "POST" }),
+    evalQueries: (project: string) => request<RagEvalQuery[]>(`${p(project)}/rag/eval-queries`),
+    createEvalQuery: (project: string, query: RagEvalQuery) =>
+      request<RagEvalQuery>(`${p(project)}/rag/eval-queries`, { method: "POST", body: JSON.stringify(query) }),
+    deleteEvalQuery: (project: string, id: string) =>
+      request<{ deleted: boolean }>(`${p(project)}/rag/eval-queries/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    evaluate: (project: string, topK = 5) =>
+      request<RagEvalResult>(`${p(project)}/rag/evaluate?top_k=${topK}`, { method: "POST" }),
   },
 
   enterprise: {

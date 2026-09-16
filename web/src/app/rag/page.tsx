@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagDocument, RagSearchResult } from "@/lib/api";
+import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagDocument, RagEvalQuery, RagEvalResult, RagSearchResult } from "@/lib/api";
 import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge, Textarea } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
 import { useAction } from "@/lib/use-action";
@@ -38,6 +38,12 @@ export default function RagPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RagSearchResult[] | null>(null);
 
+  const [evalQueries, setEvalQueries] = useState<RagEvalQuery[]>([]);
+  const [evalId, setEvalId] = useState("");
+  const [evalQuery, setEvalQuery] = useState("");
+  const [evalDocIds, setEvalDocIds] = useState("");
+  const [evalResult, setEvalResult] = useState<RagEvalResult | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -47,6 +53,7 @@ export default function RagPage() {
       setDocuments(docs);
       setLoaded(true);
     });
+    api.rag.evalQueries(projectId).then(setEvalQueries);
   };
 
   useEffect(() => {
@@ -131,6 +138,34 @@ export default function RagPage() {
   const handleSearch = async () => {
     if (!query.trim() || !projectId) return;
     setResults(await api.rag.search(projectId, query, 3));
+  };
+
+  const createEvalQueryAction = useAction(
+    (q: RagEvalQuery) => api.rag.createEvalQuery(projectId!, q),
+    { success: "Requête d'évaluation ajoutée." },
+  );
+  const handleCreateEvalQuery = async () => {
+    if (!evalId.trim() || !evalQuery.trim() || !evalDocIds.trim() || !projectId) return;
+    const relevant_doc_ids = evalDocIds.split(",").map((id) => id.trim()).filter(Boolean);
+    const created = await createEvalQueryAction.run({ id: evalId.trim(), query: evalQuery.trim(), relevant_doc_ids });
+    if (created) {
+      setEvalId("");
+      setEvalQuery("");
+      setEvalDocIds("");
+      refresh();
+    }
+  };
+
+  const deleteEvalQueryAction = useAction((id: string) => api.rag.deleteEvalQuery(projectId!, id));
+  const handleDeleteEvalQuery = async (id: string) => {
+    const res = await deleteEvalQueryAction.run(id);
+    if (res) refresh();
+  };
+
+  const evaluateAction = useAction(() => api.rag.evaluate(projectId!), { success: "Évaluation terminée." });
+  const handleEvaluate = async () => {
+    const res = await evaluateAction.run();
+    if (res) setEvalResult(res);
   };
 
   return (
@@ -278,6 +313,76 @@ export default function RagPage() {
               </Card>
             ))}
           </div>
+        )}
+      </section>
+
+      <section className="border-t border-border pt-6 space-y-4">
+        <SectionTitle>Évaluation du retrieval</SectionTitle>
+        <p className="text-text-secondary text-sm">
+          Recall@K et MRR sur un jeu de requêtes étiquetées — mesure uniquement la qualité de la recherche
+          (les bons chunks sont-ils retrouvés ?), pas si une réponse générée s&apos;appuie dessus.
+        </p>
+
+        <div className="space-y-2">
+          {evalQueries.length === 0 ? (
+            <EmptyState>Aucune requête d&apos;évaluation. Ajoutes-en une ci-dessous.</EmptyState>
+          ) : (
+            evalQueries.map((q) => (
+              <div key={q.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-md bg-surface border border-border">
+                <div>
+                  <Pill>{q.id}</Pill>
+                  <span className="ml-2 text-text-secondary">{q.query}</span>
+                  <span className="ml-2 text-text-muted text-xs font-mono">→ {q.relevant_doc_ids.join(", ")}</span>
+                </div>
+                <button onClick={() => handleDeleteEvalQuery(q.id)} className="text-error/80 hover:text-error text-xs font-medium transition-colors">
+                  Supprimer
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <Card className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <Input value={evalId} onChange={setEvalId} placeholder="id (ex: q1)" className="w-32" />
+            <Input value={evalQuery} onChange={setEvalQuery} placeholder="Question posée…" className="flex-1 min-w-[200px]" />
+            <Input value={evalDocIds} onChange={setEvalDocIds} placeholder="documents pertinents (ids séparés par des virgules)" className="flex-1 min-w-[240px]" />
+          </div>
+          <Button onClick={handleCreateEvalQuery} disabled={createEvalQueryAction.busy}>Ajouter la requête</Button>
+        </Card>
+
+        <div className="flex items-center gap-3">
+          <Button variant="accent" onClick={handleEvaluate} disabled={evaluateAction.busy || evalQueries.length === 0}>
+            {evaluateAction.busy ? "Évaluation…" : "Lancer l'évaluation"}
+          </Button>
+          {evaluateAction.error && <p className="text-error text-xs">{evaluateAction.error}</p>}
+        </div>
+
+        {evalResult && (
+          <Card className="space-y-3">
+            <div className="flex gap-6">
+              <div>
+                <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Recall@{evalResult.top_k}</p>
+                <p className="font-display text-2xl text-accent">{evalResult.recall_at_k != null ? `${(evalResult.recall_at_k * 100).toFixed(0)}%` : "—"}</p>
+              </div>
+              <div>
+                <p className="text-text-muted text-xs uppercase tracking-wide mb-1">MRR</p>
+                <p className="font-display text-2xl text-accent">{evalResult.mrr?.toFixed(3) ?? "—"}</p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {evalResult.queries.map((q) => (
+                <div key={q.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-md bg-surface border border-border">
+                  <span>
+                    <Pill>{q.id}</Pill> <span className="ml-2 text-text-secondary">{q.query}</span>
+                  </span>
+                  <span className={`text-xs font-mono ${q.hit ? "text-success" : "text-error"}`}>
+                    {q.hit ? `trouvé (rang ${q.rank})` : "non trouvé"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
         )}
       </section>
     </div>
