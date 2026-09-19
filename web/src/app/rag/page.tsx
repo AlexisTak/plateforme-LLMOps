@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagDocument, RagEvalQuery, RagEvalResult, RagSearchResult } from "@/lib/api";
+import { api, JobStatus, RAG_CATEGORIES, RagCategory, RagCategoryAcl, RagDocument, RagEvalQuery, RagEvalResult, RagSearchResult, RoleName } from "@/lib/api";
 import { Button, Card, ConfirmDialog, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge, Textarea } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
 import { useAction } from "@/lib/use-action";
+
+const ROLE_OPTIONS: RoleName[] = ["viewer", "operator", "reviewer", "admin"];
 
 const CATEGORY_LABELS: Record<string, string> = {
   methods: "Méthodes d'organisation",
@@ -44,6 +46,8 @@ export default function RagPage() {
   const [evalDocIds, setEvalDocIds] = useState("");
   const [evalResult, setEvalResult] = useState<RagEvalResult | null>(null);
 
+  const [acls, setAcls] = useState<RagCategoryAcl[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -54,6 +58,7 @@ export default function RagPage() {
       setLoaded(true);
     });
     api.rag.evalQueries(projectId).then(setEvalQueries);
+    api.rag.acls(projectId).then(setAcls).catch(() => {}); // any project member can read; non-members just get an empty section
   };
 
   useEffect(() => {
@@ -166,6 +171,15 @@ export default function RagPage() {
   const handleEvaluate = async () => {
     const res = await evaluateAction.run();
     if (res) setEvalResult(res);
+  };
+
+  const updateAclAction = useAction(
+    (category: RagCategory, minimumRole: RoleName) => api.rag.updateAcl(projectId!, category, minimumRole),
+    { success: "Droits d'accès mis à jour." },
+  );
+  const handleAclChange = async (category: RagCategory, minimumRole: RoleName) => {
+    const updated = await updateAclAction.run(category, minimumRole);
+    if (updated) setAcls((current) => current.map((a) => (a.category === category ? updated : a)));
   };
 
   return (
@@ -385,6 +399,35 @@ export default function RagPage() {
           </Card>
         )}
       </section>
+
+      {acls.length > 0 && (
+        <section className="border-t border-border pt-6 space-y-4">
+          <SectionTitle>Droits d&apos;accès par catégorie</SectionTitle>
+          <p className="text-text-secondary text-sm">
+            Rôle minimum requis pour voir et chercher dans chaque catégorie — un membre du projet dont le rôle est
+            inférieur ne verra ni les documents ni les résultats de recherche de cette catégorie. Réservé aux admins.
+          </p>
+          <div className="space-y-2">
+            {acls.map((acl) => (
+              <div key={acl.category} className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-surface border border-border">
+                <span className="text-sm">{CATEGORY_LABELS[acl.category] ?? acl.category}</span>
+                <Select
+                  value={acl.minimum_role}
+                  disabled={updateAclAction.busy}
+                  onChange={(v) => handleAclChange(acl.category, v as RoleName)}
+                  className="w-40"
+                >
+                  {ROLE_OPTIONS.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

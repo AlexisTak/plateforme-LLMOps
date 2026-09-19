@@ -352,6 +352,21 @@ class RagDocumentCreate(BaseModel):
     content: str
 
 
+class RagCategoryAcl(BaseModel):
+    """Minimum project role (api.enterprise.ROLES) required to search or list
+    documents in this category — F07 "droits de l'utilisateur", on top of the
+    project-membership check every /rag route already requires. A category with
+    no row defaults to "viewer" (today's behaviour: any project member sees it)."""
+
+    category: RagCategory
+    minimum_role: str
+
+
+class RagCategoryAclUpdate(BaseModel):
+    category: RagCategory
+    minimum_role: str
+
+
 class RagReindexResult(BaseModel):
     n_chunks: int
     n_documents: int
