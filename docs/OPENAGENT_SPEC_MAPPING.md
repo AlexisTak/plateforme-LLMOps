@@ -12,7 +12,7 @@ de valeur au MVP actuel.
 | F02 Espaces et rôles | Partiel | Projets isolés, membres et rôles dans le plan de contrôle SQLite |
 | F03 CRUD agents | Couvert | Projets, Settings, activation par registre et archivage |
 | F04 Fournisseurs | Couvert | Registre Ollama, API compatible OpenAI et API compatible Anthropic, secrets par référence d'environnement et test de connexion |
-| F05 Conversation et historique | Partiel | Chat en streaming SSE et exécutions expurgées persistantes; historique conversationnel durable reste à faire |
+| F05 Conversation et historique | Couvert | Chat en streaming SSE, exécutions expurgées persistantes et historique conversationnel durable par conversation (SQLite, isolé par projet et par acteur) |
 | F06 PDF DOCX TXT MD | Couvert | Ingestion, extraction, indexation asynchrone et erreurs explicites |
 | F07 Recherche filtrée | Partiel | Index séparé par projet; ACL fines par catégorie et par rôle sur la recherche; espaces multiples (Organization/Workspace) restent hors scope (ADR-0006) |
 | F08 Catalogue d'outils | Couvert | Outils HTTP GET ou POST et MCP Streamable HTTP en lecture, timeout et limite de réponse |
@@ -178,6 +178,33 @@ documenté comme convention durable dans
   `<!DOCTYPE` avant analyse (un vrai `word/document.xml` n'en déclare jamais) —
   ferme à la fois ce vecteur et l'injection d'entité externe (XXE), sans
   ajouter de dépendance de parseur XML durci.
+
+## Historique conversationnel durable (F05, 2026-09-19)
+
+Le chat (`api/routes/chat.py`) restait sans état : `body.history` n'était
+qu'un tampon renvoyé par le client à chaque appel, perdu au rechargement de
+page. Ajouté sans casser de contrat existant :
+
+- **Tables additives** `chat_conversations`/`chat_messages` (`api/enterprise.py`),
+  même schéma additif que le reste du contrôle-plane (indexées, `ON DELETE
+  CASCADE` sur les messages).
+- **Persistance opt-in** : `ChatRequest.persist`/`conversation_id` — un appel
+  qui ne les fournit pas garde le comportement exact d'avant (aucune écriture),
+  un appel qui fournit `persist=true` crée une conversation et retourne son id
+  (`ChatResponse.conversation_id`, aussi dans l'évènement SSE `metadata`/`done`
+  du chat en flux), un appel qui fournit `conversation_id` y ajoute les
+  messages. Isolation par projet et par acteur au niveau du store (une
+  conversation n'est visible/modifiable que par son créateur dans son projet).
+- **Endpoints** `GET/POST .../chat/conversations`, `GET/PATCH/DELETE
+  .../chat/conversations/{id}` — liste, détail avec messages, renommage,
+  suppression.
+- **Web** : `web/src/app/chat/page.tsx` a désormais une barre latérale de
+  conversations (nouvelle conversation, sélection, suppression avec
+  confirmation) ; la conversation active est mémorisée par projet dans
+  `localStorage` pour être restaurée au rechargement — seul son id y est
+  gardé, les messages eux-mêmes viennent du serveur.
+- Couvert par `tests/test_chat_conversations.py` (store : cycle complet,
+  isolation projet/acteur, cascade de suppression, titres).
 
 ## ACL fines sur la recherche RAG (F07, 2026-09-19)
 
