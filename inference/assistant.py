@@ -44,17 +44,20 @@ class AssistantResult:
 
 
 class Assistant:
-    def __init__(self, project_dir: Path, adapter: str | None = None, system_prompt: str | None = None):
+    def __init__(self, project_dir: Path, adapter: str | None = None, system_prompt: str | None = None,
+                 allowed_categories: set[str] | None = None):
         self.project_dir = project_dir
         self.adapter = adapter
         self.system_prompt = system_prompt
+        # F07: RAG categories this caller may see (None = unrestricted, e.g. CLI use).
+        self.allowed_categories = allowed_categories
 
     def _build_message(self, message: str, user_context: dict | None, rag: bool) -> tuple[str, RagContext | None]:
         parts = [message]
         rag_context = None
 
         if rag:
-            rag_context = build_context(message, self.project_dir)
+            rag_context = build_context(message, self.project_dir, allowed_categories=self.allowed_categories)
             message_with_rag = build_user_message(message, rag_context)
             if rag_context.context_block:
                 parts = [message_with_rag]

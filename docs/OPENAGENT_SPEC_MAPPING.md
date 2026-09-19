@@ -270,6 +270,36 @@ volet qui manquait. Ajouté sans casser de contrat existant :
   routes : blocage HTTP 429 sur chat et sur exécution d'outil une fois le
   budget dépensé, admin requis pour modifier un budget).
 
+## Corrections post-revue (F05/F07/F14, 2026-09-19)
+
+Revue de code de `main` après le merge des trois lots ci-dessus — six
+constats, tous corrigés dans une seule PR avec un test de non-régression
+chacun (`tests/test_post_merge_review_fixes.py`) :
+
+- **Contournement des ACL RAG par le chat** — `POST .../chat` avec `rag=true`
+  passait par `rag/context_builder.build_context` sans aucun filtrage : un
+  viewer exclu d'une catégorie obtenait ses chunks (et ses doc ids dans
+  `rag_chunks`) via une réponse du modèle. `build_context` et `Assistant`
+  acceptent désormais `allowed_categories`, que les routes chat alimentent avec
+  le même `rag_categories_allowed` que `/rag/search`.
+- **Routes chat et conversations sans contrôle d'appartenance** — même classe
+  de faille que celle fermée sur `/rag/*` en F07 : `store.require_project_role`
+  est maintenant appelé sur chaque route de `api/routes/chat.py`.
+- **Budget vérifié avant l'authentification** — en mode `proxy`, une requête
+  sans en-têtes recevait un 429 (avec les limites) au lieu d'un 401. Ordre
+  corrigé : authentification → appartenance → budget.
+- **`GET .../budget` sans contrôle d'accès** — consommation du jour de
+  n'importe quel projet lisible par quiconque ; réservé aux membres.
+- **Conversations orphelines sur premier message en échec** — la conversation
+  était créée avant la génération. Elle n'est plus créée (et les deux tours ne
+  sont persistés) qu'après une génération réussie, pour `/chat` comme pour
+  `/chat/stream` ; l'id d'une nouvelle conversation n'arrive donc que dans
+  l'évènement SSE `done` (le client web lit `metadata` ou `done`).
+- **Web : changement de conversation pendant un flux** — les lignes de la
+  barre latérale (et leur bouton de suppression) sont verrouillées tant qu'une
+  réponse est en cours, sinon les tokens s'ajoutaient à la conversation
+  nouvellement affichée.
+
 ## Prochain lot prioritaire
 
 Aucun — les 4 lots de la feuille de route (CLAUDE.md §28) sont couverts, dans

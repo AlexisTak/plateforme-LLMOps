@@ -47,13 +47,20 @@ class RagContext:
     context_block: str  # empty string if nothing relevant was found
 
 
-def build_context(query: str, project_dir: Path, top_k: int = DEFAULT_TOP_K, score_threshold: float = SCORE_THRESHOLD) -> RagContext:
+def build_context(query: str, project_dir: Path, top_k: int = DEFAULT_TOP_K, score_threshold: float = SCORE_THRESHOLD,
+                  allowed_categories: set[str] | None = None) -> RagContext:
+    """`allowed_categories` is the caller's F07 per-category ACL (api/routes/rag.py
+    filters /rag/search the same way); None means no restriction. Enforced here,
+    not only in the search route, so RAG-grounded chat can't leak a restricted
+    category's chunks into an answer."""
     candidates = retrieve(query, project_dir, top_k=top_k)
     selected: list[RetrievedChunk] = []
     used_chars = 0
     budget_chars = MAX_CONTEXT_TOKENS_APPROX * 4
 
     for chunk in candidates:
+        if allowed_categories is not None and chunk.category not in allowed_categories:
+            continue
         if chunk.score < score_threshold:
             continue
         if used_chars + len(chunk.text) > budget_chars and selected:
