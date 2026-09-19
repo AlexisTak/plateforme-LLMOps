@@ -239,7 +239,9 @@ def update_quota(body: QuotaUpdate, request: Request, project: Path = Depends(pr
 
 
 @router.get("/projects/{project_id}/budget")
-def get_budget(project: Path = Depends(project_dir)):
+def get_budget(request: Request, project: Path = Depends(project_dir)):
+    # Usage figures are activity metadata of the project — members only.
+    store.require_project_role(project.name, actor(request))
     return {**store.agent_budget(project.name), **store.agent_budget_usage(project.name)}
 
 

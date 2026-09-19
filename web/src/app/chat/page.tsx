@@ -274,19 +274,24 @@ function ProjectChat({ projectId }: { projectId: string }) {
               <p className="text-text-muted text-xs text-center py-4">Aucune conversation enregistrée.</p>
             ) : (
               conversations.map((c) => (
+                // Locked while a reply is streaming: the token handler appends to the last
+                // turn of whatever is displayed, so switching (or deleting) mid-stream would
+                // corrupt another conversation's view.
                 <div
                   key={c.id}
-                  className={`group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer text-sm ${
-                    c.id === conversationId ? "bg-accent-soft text-text-primary" : "hover:bg-surface-hover text-text-secondary"
-                  }`}
-                  onClick={() => openConversation(c.id)}
+                  aria-disabled={busy}
+                  className={`group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm ${
+                    busy ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                  } ${c.id === conversationId ? "bg-accent-soft text-text-primary" : "hover:bg-surface-hover text-text-secondary"}`}
+                  onClick={() => { if (!busy) openConversation(c.id); }}
                 >
                   <span className="flex-1 truncate" title={c.title}>{c.title}</span>
                   <span className="text-xs text-text-muted shrink-0">{c.message_count}</span>
                   <button
                     type="button"
                     aria-label="Supprimer la conversation"
-                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error shrink-0"
+                    disabled={busy}
+                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error shrink-0 disabled:pointer-events-none"
                     onClick={(e) => { e.stopPropagation(); setPendingDelete(c); }}
                   >
                     ×
