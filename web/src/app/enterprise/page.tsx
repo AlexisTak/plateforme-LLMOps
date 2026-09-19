@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, AuditEvent, EnterpriseContext, EnterpriseMetrics, ModelVersion, ProjectMember, ProjectQuota } from "@/lib/api";
+import { AgentBudget, api, AuditEvent, EnterpriseContext, EnterpriseMetrics, ModelVersion, ProjectMember, ProjectQuota } from "@/lib/api";
 import { useProject } from "@/lib/project-context";
 import { Button, Card, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { humanError } from "@/lib/errors";
@@ -21,6 +21,7 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
   const [versions, setVersions] = useState<ModelVersion[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [quota, setQuota] = useState<ProjectQuota | null>(null);
+  const [budget, setBudget] = useState<AgentBudget | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [version, setVersion] = useState("");
   const [notes, setNotes] = useState("");
@@ -31,11 +32,11 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [c, m, v, a, q, team] = await Promise.all([
+    const [c, m, v, a, q, b, team] = await Promise.all([
       api.enterprise.context(), api.enterprise.metrics(), api.enterprise.registry(projectId),
-      api.enterprise.audit(projectId), api.enterprise.quota(projectId), api.enterprise.members(projectId),
+      api.enterprise.audit(projectId), api.enterprise.quota(projectId), api.enterprise.budget(projectId), api.enterprise.members(projectId),
     ]);
-    setContext(c); setMetrics(m); setVersions(v); setEvents(a); setQuota(q); setMembers(team); setError(null);
+    setContext(c); setMetrics(m); setVersions(v); setEvents(a); setQuota(q); setBudget(b); setMembers(team); setError(null);
     setLoaded(true);
   }, [projectId]);
 
@@ -108,6 +109,20 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
         <Button disabled={busy} onClick={() => act(() => api.enterprise.updateQuota(projectId, quota))}>Enregistrer</Button>
         <p className="text-xs text-text-muted sm:col-span-4">{quota.running_jobs ?? 0} job(s) actif(s) · {quota.storage_used_gb ?? 0} Go utilisés. Les trois limites sont appliquées avant l’exécution.</p>
       </Card> : <EmptyState>Chargement des quotas…</EmptyState>}
+    </section>
+
+    <section>
+      <SectionTitle>Budget de l’agent (aujourd’hui)</SectionTitle>
+      {budget ? <Card className="grid gap-4 sm:grid-cols-4 items-end">
+        <QuotaInput label="Jetons / jour" value={budget.max_tokens_per_day} onChange={(v) => setBudget({ ...budget, max_tokens_per_day: v })} />
+        <QuotaInput label="Durée (ms) / jour" value={budget.max_duration_ms_per_day} onChange={(v) => setBudget({ ...budget, max_duration_ms_per_day: v })} />
+        <QuotaInput label="Appels d’outils / jour" value={budget.max_tool_calls_per_day} onChange={(v) => setBudget({ ...budget, max_tool_calls_per_day: v })} />
+        <Button disabled={busy} onClick={() => act(() => api.enterprise.updateBudget(projectId, budget))}>Enregistrer</Button>
+        <p className="text-xs text-text-muted sm:col-span-4">
+          {budget.tokens_used ?? 0} / {budget.max_tokens_per_day} jetons · {budget.duration_ms_used ?? 0} / {budget.max_duration_ms_per_day} ms ·{" "}
+          {budget.tool_calls_used ?? 0} / {budget.max_tool_calls_per_day} appels d’outils. Réinitialisé chaque jour (UTC) ; appliqué avant chaque échange de chat et chaque exécution d’outil.
+        </p>
+      </Card> : <EmptyState>Chargement du budget…</EmptyState>}
     </section>
 
     <section>

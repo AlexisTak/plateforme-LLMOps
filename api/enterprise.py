@@ -103,6 +103,11 @@ class EnterpriseStore:
                   project_id TEXT PRIMARY KEY, max_concurrent_jobs INTEGER NOT NULL DEFAULT 2,
                   max_daily_jobs INTEGER NOT NULL DEFAULT 25, max_storage_gb REAL NOT NULL DEFAULT 50
                 );
+                CREATE TABLE IF NOT EXISTS agent_budgets (
+                  project_id TEXT PRIMARY KEY, max_tokens_per_day INTEGER NOT NULL DEFAULT 200000,
+                  max_duration_ms_per_day INTEGER NOT NULL DEFAULT 7200000,
+                  max_tool_calls_per_day INTEGER NOT NULL DEFAULT 500
+                );
                 CREATE TABLE IF NOT EXISTS project_members (
                   project_id TEXT NOT NULL, actor_id TEXT NOT NULL, email TEXT NOT NULL,
                   name TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -329,6 +334,42 @@ class EnterpriseStore:
             db.execute("INSERT INTO quotas VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET max_concurrent_jobs=excluded.max_concurrent_jobs,max_daily_jobs=excluded.max_daily_jobs,max_storage_gb=excluded.max_storage_gb",
                        (project_id, concurrent, daily, storage))
         return self.quota(project_id)
+
+    def agent_budget(self, project_id: str) -> dict[str, Any]:
+        """F14 "Budgets par agent en jetons, durée et nombre d'appels d'outils" — an
+        "agent" in this app is a project (F03). Same insert-if-missing pattern as
+        quota()/set_quota() above."""
+        with self._connect() as db:
+            db.execute("INSERT OR IGNORE INTO agent_budgets(project_id) VALUES (?)", (project_id,))
+            return dict(db.execute("SELECT * FROM agent_budgets WHERE project_id=?", (project_id,)).fetchone())
+
+    def set_agent_budget(self, project_id: str, max_tokens_per_day: int, max_duration_ms_per_day: int,
+                         max_tool_calls_per_day: int) -> dict[str, Any]:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO agent_budgets VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET "
+                "max_tokens_per_day=excluded.max_tokens_per_day,max_duration_ms_per_day=excluded.max_duration_ms_per_day,"
+                "max_tool_calls_per_day=excluded.max_tool_calls_per_day",
+                (project_id, max_tokens_per_day, max_duration_ms_per_day, max_tool_calls_per_day),
+            )
+        return self.agent_budget(project_id)
+
+    def agent_budget_usage(self, project_id: str) -> dict[str, Any]:
+        """Cumulative usage for the current UTC day — tokens/duration from executions
+        (chat), tool calls from the audit log (covers both the direct-allow path and
+        the approve-then-execute path, api/routes/enterprise.py::execute_tool /
+        decide_approval — neither writes to a dedicated "tool call" table)."""
+        today = now()[:10]
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT COALESCE(SUM(estimated_tokens),0) AS tokens, COALESCE(SUM(duration_ms),0) AS duration_ms "
+                "FROM executions WHERE project_id=? AND started_at>=?", (project_id, today),
+            ).fetchone()
+            tool_calls = db.execute(
+                "SELECT COUNT(*) FROM audit_events WHERE project_id=? AND created_at>=? "
+                "AND action IN ('tool.executed','tool.approval.approved')", (project_id, today),
+            ).fetchone()[0]
+        return {"tokens_used": row["tokens"] or 0, "duration_ms_used": row["duration_ms"] or 0, "tool_calls_used": tool_calls}
 
     def members(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:

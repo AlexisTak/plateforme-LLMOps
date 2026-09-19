@@ -15,6 +15,7 @@ from api.enterprise import actor_from_request, store
 
 from api.model_manager import manager
 from api.paths import project_dir
+from api.routes.enterprise import enforce_agent_budget
 from api.schemas import ChatRequest, ChatResponse
 from inference.assistant import Assistant
 
@@ -34,6 +35,8 @@ def list_adapters(project: Path = Depends(project_dir)):
 def chat(body: ChatRequest, request: Request, project: Path = Depends(project_dir)):
     if body.adapter is not None and body.adapter not in manager.available_adapters(project):
         raise HTTPException(400, "Adapter absent de ce projet")
+    enforce_agent_budget(project, "tokens")
+    enforce_agent_budget(project, "duration")
     assistant = Assistant(project_dir=project, adapter=body.adapter, system_prompt=body.system_prompt)
     meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
     execution_id = store.start_execution(project.name, actor_from_request(request).id,
@@ -58,6 +61,8 @@ def chat(body: ChatRequest, request: Request, project: Path = Depends(project_di
 def chat_stream(body: ChatRequest, request: Request, project: Path = Depends(project_dir)):
     if body.adapter is not None and body.adapter not in manager.available_adapters(project):
         raise HTTPException(400, "Adapter absent de ce projet")
+    enforce_agent_budget(project, "tokens")
+    enforce_agent_budget(project, "duration")
     assistant = Assistant(project_dir=project, adapter=body.adapter, system_prompt=body.system_prompt)
     meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
     execution_id = store.start_execution(project.name, actor_from_request(request).id,
