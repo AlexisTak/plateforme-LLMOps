@@ -300,6 +300,36 @@ chacun (`tests/test_post_merge_review_fixes.py`) :
   réponse est en cours, sinon les tokens s'ajoutaient à la conversation
   nouvellement affichée.
 
+## Optimisation et hygiène (2026-09-20)
+
+Passe d'optimisation après la revue post-merge, sans changement de contrat :
+
+- **Dépôt** : 96 fichiers `__pycache__/*.pyc` étaient versionnés (bruit à
+  chaque diff, conflits gratuits) et il n'y avait pas de `.gitignore` racine —
+  ajouté, bytecode retiré de l'index, `.enterprise/`, `.jobs/`, `.venv/`
+  ignorés.
+- **Sauvegarde/restauration cassée sous Windows (NF09)** — `str(Path)` donnait
+  des `\` dans le manifeste et dans les tests de préfixe d'exclusion : la
+  restauration d'une sauvegarde faite sous Windows échouait toujours
+  (« fichier manquant dans l'archive ») et les exclusions `models/base` etc. ne
+  matchaient jamais — l'archive embarquait silencieusement le modèle de base.
+  Chemins POSIX partout (`as_posix()`), test round-trip vert sous Windows.
+- **Tests isolés** : `tests/conftest.py` pointe `BISCUITS_ENTERPRISE_DB` et le
+  nouveau `BISCUITS_JOBS_DIR` vers un répertoire temporaire de session — la
+  suite n'écrit plus dans `.enterprise/`/`.jobs/` du dépôt et ne dépend plus
+  d'ids de projet « uniques » pour éviter les collisions.
+- **Chemins chauds** : scan de stockage des quotas en `os.scandir` (une
+  lecture de répertoire par niveau, taille fournie par l'entrée sous Windows,
+  ~3,7× plus rapide que `rglob`+`stat` par fichier) et vérifié en dernier ;
+  `enforce_agent_budget` accepte plusieurs axes en une lecture ; `mkdir` du
+  store sorti du chemin par connexion ; index composite
+  `audit_events(project_id, action, created_at)` pour le décompte d'appels
+  d'outils.
+- **Code** : préambule commun de `/chat` et `/chat/stream` factorisé
+  (`_prepare_exchange`), imports morts et `assert False` retirés (ruff), les
+  cinq erreurs ESLint préexistantes de la console web corrigées (`npm run
+  lint` repasse au vert).
+
 ## Prochain lot prioritaire
 
 Aucun — les 4 lots de la feuille de route (CLAUDE.md §28) sont couverts, dans

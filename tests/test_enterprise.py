@@ -351,7 +351,6 @@ def test_restore_refuses_to_overwrite_an_existing_project(monkeypatch, tmp_path:
 
 def test_restore_rejects_tampered_archive_and_cleans_up(monkeypatch, tmp_path: Path):
     import io
-    import json
     import zipfile
 
     source = tmp_path / "source"

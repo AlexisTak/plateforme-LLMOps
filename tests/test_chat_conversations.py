@@ -2,6 +2,7 @@
 coverage, same pattern as tests/test_enterprise.py: exercise EnterpriseStore directly
 rather than the /chat HTTP routes, which need a real model loaded."""
 
+import time
 from pathlib import Path
 
 from api.enterprise import EnterpriseStore
@@ -30,6 +31,7 @@ def test_add_message_bumps_updated_at_and_list_orders_by_recency(tmp_path: Path)
     control = _store(tmp_path)
     older = control.create_conversation("demo", "alice", "Ancienne")
     newer = control.create_conversation("demo", "alice", "Récente")
+    time.sleep(0.002)  # updated_at is ISO microseconds — make the bump strictly later than `newer`
     control.add_message("demo", older, "user", "hello")
 
     listed = control.list_conversations("demo", "alice")

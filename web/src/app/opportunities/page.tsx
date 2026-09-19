@@ -19,7 +19,7 @@ export default function OpportunitiesPage() {
   }, []);
 
   useEffect(() => {
-    refresh().catch(() => setLoaded(true));
+    Promise.resolve().then(refresh).catch(() => setLoaded(true));
   }, [refresh]);
 
   const createAction = useAction((name: string) => api.opportunities.create({ name }), {
@@ -41,7 +41,7 @@ export default function OpportunitiesPage() {
       <Input value={name} onChange={setName} placeholder="Nom de la nouvelle opportunité" className="flex-1 min-w-56" />
       <Button variant="accent" disabled={createAction.busy || !name.trim()} onClick={create}>Créer</Button>
     </Card>
-    {!loaded ? <div className="grid gap-3 md:grid-cols-2"><Skeleton className="h-28" /><Skeleton className="h-28" /></div> : opportunities.length === 0 ? <EmptyState>Aucune opportunité pour l'instant.</EmptyState> : <div className="grid gap-3 md:grid-cols-2">
+    {!loaded ? <div className="grid gap-3 md:grid-cols-2"><Skeleton className="h-28" /><Skeleton className="h-28" /></div> : opportunities.length === 0 ? <EmptyState>Aucune opportunité pour l&apos;instant.</EmptyState> : <div className="grid gap-3 md:grid-cols-2">
       {opportunities.map((item) => {
         const label = SCORE_LABELS[item.score.label];
         return <Link key={item.id} href={`/opportunities/${item.id}`}>
