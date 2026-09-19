@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { Button, Input, PageHeader, Select } from "@/components/ui";
+import { useCallback, useEffect, useState } from "react";
+import { api, ConversationSummary } from "@/lib/api";
+import { Button, ConfirmDialog, Input, PageHeader, Select, Skeleton } from "@/components/ui";
 import { useProject } from "@/lib/project-context";
 import { humanError } from "@/lib/errors";
+import { useAction } from "@/lib/use-action";
 
 type Turn = { role: "user" | "assistant"; content: string; ragChunks?: string[] };
 
@@ -83,6 +84,8 @@ export default function ChatPage() {
   return projectId ? <ProjectChat key={projectId} projectId={projectId} /> : <p>Sélectionne un projet.</p>;
 }
 
+const LAST_CONVERSATION_KEY = (projectId: string) => `biscuits-focus:last-conversation:${projectId}`;
+
 function ProjectChat({ projectId }: { projectId: string }) {
   const [adapters, setAdapters] = useState<string[]>([]);
   const [adapter, setAdapter] = useState<string | null>(null);
@@ -93,6 +96,34 @@ function ProjectChat({ projectId }: { projectId: string }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState("");
+
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
+
+  const loadConversations = useCallback(
+    () => api.chat.conversations(projectId).then((list) => { setConversations(list); setConversationsLoaded(true); }),
+    [projectId],
+  );
+
+  const openConversation = useCallback(async (id: string | null) => {
+    setError(null);
+    if (!id) {
+      setConversationId(null);
+      setTurns([]);
+      try { localStorage.removeItem(LAST_CONVERSATION_KEY(projectId)); } catch { /* optional */ }
+      return;
+    }
+    try {
+      const detail = await api.chat.getConversation(projectId, id);
+      setConversationId(detail.id);
+      setTurns(detail.messages.map((m) => ({ role: m.role, content: m.content, ragChunks: m.rag_chunks })));
+      try { localStorage.setItem(LAST_CONVERSATION_KEY(projectId), detail.id); } catch { /* optional */ }
+    } catch (e) {
+      setError(humanError(e));
+    }
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
@@ -106,8 +137,33 @@ function ProjectChat({ projectId }: { projectId: string }) {
       } catch { /* storage can be disabled; base model remains available */ }
       setReady(true);
     }).catch((e) => { if (active) setError(humanError(e)); });
+    loadConversations().catch(() => setConversationsLoaded(true));
+    let lastConversationId: string | null = null;
+    try { lastConversationId = localStorage.getItem(LAST_CONVERSATION_KEY(projectId)); } catch { /* optional */ }
+    if (lastConversationId) {
+      api.chat.getConversation(projectId, lastConversationId).then((detail) => {
+        if (!active) return;
+        setConversationId(detail.id);
+        setTurns(detail.messages.map((m) => ({ role: m.role, content: m.content, ragChunks: m.rag_chunks })));
+      }).catch(() => { try { localStorage.removeItem(LAST_CONVERSATION_KEY(projectId)); } catch { /* optional */ } });
+    }
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const deleteAction = useAction(async (id: string) => {
+    await api.chat.deleteConversation(projectId, id);
+    return id;
+  }, { success: "Conversation supprimée." });
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const item = pendingDelete;
+    setPendingDelete(null);
+    const deletedId = await deleteAction.run(item.id);
+    if (deletedId === undefined) return; // deletion failed — list/state untouched
+    if (conversationId === deletedId) await openConversation(null);
+    loadConversations();
+  };
 
   const send = async () => {
     if (!input.trim() || busy || !ready) return;
@@ -117,6 +173,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
     setInput("");
     setBusy(true);
     setError(null);
+    let nextConversationId: string | null = null;
     try {
       const history = previousTurns.slice(-12).map(({ role, content }) => ({ role, content }));
       await api.chat.stream(projectId, message, adapter, rag, history,
@@ -125,11 +182,21 @@ function ProjectChat({ projectId }: { projectId: string }) {
             setTurns((current) => current.map((turn, index) => index === current.length - 1
               ? { ...turn, content: turn.content + String(payload.text || "") } : turn));
           }
+          if ((event === "metadata" || event === "done") && typeof payload.conversation_id === "string") {
+            nextConversationId = payload.conversation_id;
+          }
           if (event === "metadata" && Array.isArray(payload.rag_chunks)) {
             setTurns((current) => current.map((turn, index) => index === current.length - 1
               ? { ...turn, ragChunks: payload.rag_chunks as string[] } : turn));
           }
-        });
+        }, conversationId, true);
+      if (nextConversationId && nextConversationId !== conversationId) {
+        setConversationId(nextConversationId);
+        try { localStorage.setItem(LAST_CONVERSATION_KEY(projectId), nextConversationId); } catch { /* optional */ }
+        loadConversations();
+      } else if (nextConversationId) {
+        loadConversations();
+      }
     } catch (e) {
       setTurns(previousTurns);
       setInput(message);
@@ -143,7 +210,7 @@ function ProjectChat({ projectId }: { projectId: string }) {
     <div className="flex flex-col h-[calc(100vh-140px)]">
       <PageHeader
         title="Chat de test"
-        description="Le chat conserve les derniers échanges. Le modèle choisi est mémorisé pour ce projet dans ce navigateur."
+        description="L'historique de chaque conversation est conservé côté serveur et reste consultable après rechargement."
         action={
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-sm text-text-secondary cursor-pointer select-none">
@@ -183,42 +250,92 @@ function ProjectChat({ projectId }: { projectId: string }) {
       </details>
       {error && <p role="alert" className="mt-3 text-sm text-error">{error}</p>}
 
-      <div className="flex-1 overflow-y-auto border border-border rounded-lg bg-surface p-4 space-y-3 mt-6">
-        {turns.length === 0 && (
-          <p className="text-text-muted text-sm text-center py-8">Envoie un message pour commencer.</p>
-        )}
-        {turns.map((t, i) => {
-          const structured = t.role === "assistant" ? parseStructuredReply(t.content) : null;
-          return (
-            <div key={i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div
-                className={`max-w-[75%] rounded-xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
-                  t.role === "user" ? "bg-accent-soft text-text-primary" : "bg-surface-hover text-text-primary border border-border"
-                }`}
-              >
-                {structured ? <StructuredReplyCard reply={structured} /> : t.content}
-                {t.ragChunks && t.ragChunks.length > 0 && (
-                  <p className="mt-2 text-xs text-text-muted font-sans not-italic">📄 sources : {t.ragChunks.join(", ")}</p>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {busy && <p className="text-text-muted text-xs">…réponse reçue en direct</p>}
-      </div>
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Supprimer cette conversation ?"
+        description={pendingDelete?.title}
+        confirmLabel="Supprimer"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
 
-      <div className="flex gap-2 mt-3">
-        <Input
-          value={input}
-          disabled={busy || !ready}
-          onChange={setInput}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Écris un message…"
-          className="flex-1"
-        />
-        <Button variant="accent" onClick={send} disabled={busy || !ready || !input.trim()}>
-          Envoyer
-        </Button>
+      <div className="flex gap-4 mt-6 flex-1 min-h-0">
+        <aside className="w-56 shrink-0 border border-border rounded-lg bg-surface flex flex-col overflow-hidden">
+          <div className="p-2 border-b border-border">
+            <Button className="w-full" disabled={busy} onClick={() => openConversation(null)}>
+              + Nouvelle conversation
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {!conversationsLoaded ? (
+              <Skeleton className="h-16" />
+            ) : conversations.length === 0 ? (
+              <p className="text-text-muted text-xs text-center py-4">Aucune conversation enregistrée.</p>
+            ) : (
+              conversations.map((c) => (
+                <div
+                  key={c.id}
+                  className={`group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer text-sm ${
+                    c.id === conversationId ? "bg-accent-soft text-text-primary" : "hover:bg-surface-hover text-text-secondary"
+                  }`}
+                  onClick={() => openConversation(c.id)}
+                >
+                  <span className="flex-1 truncate" title={c.title}>{c.title}</span>
+                  <span className="text-xs text-text-muted shrink-0">{c.message_count}</span>
+                  <button
+                    type="button"
+                    aria-label="Supprimer la conversation"
+                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error shrink-0"
+                    onClick={(e) => { e.stopPropagation(); setPendingDelete(c); }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-y-auto border border-border rounded-lg bg-surface p-4 space-y-3">
+            {turns.length === 0 && (
+              <p className="text-text-muted text-sm text-center py-8">Envoie un message pour commencer.</p>
+            )}
+            {turns.map((t, i) => {
+              const structured = t.role === "assistant" ? parseStructuredReply(t.content) : null;
+              return (
+                <div key={i} className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[75%] rounded-xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${
+                      t.role === "user" ? "bg-accent-soft text-text-primary" : "bg-surface-hover text-text-primary border border-border"
+                    }`}
+                  >
+                    {structured ? <StructuredReplyCard reply={structured} /> : t.content}
+                    {t.ragChunks && t.ragChunks.length > 0 && (
+                      <p className="mt-2 text-xs text-text-muted font-sans not-italic">📄 sources : {t.ragChunks.join(", ")}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {busy && <p className="text-text-muted text-xs">…réponse reçue en direct</p>}
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            <Input
+              value={input}
+              disabled={busy || !ready}
+              onChange={setInput}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder="Écris un message…"
+              className="flex-1"
+            />
+            <Button variant="accent" onClick={send} disabled={busy || !ready || !input.trim()}>
+              Envoyer
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

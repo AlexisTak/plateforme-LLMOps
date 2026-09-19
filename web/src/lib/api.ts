@@ -31,6 +31,10 @@ const p = (project: string) => `/api/projects/${encodeURIComponent(project)}`;
 
 export type Message = { role: "system" | "user" | "assistant"; content: string };
 
+export type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; message_count: number };
+export type ConversationMessage = { id: string; role: "user" | "assistant"; content: string; rag_chunks: string[]; created_at: string };
+export type ConversationDetail = ConversationSummary & { messages: ConversationMessage[] };
+
 export type DatasetCategorySummary = { category: string; files: string[]; example_count: number };
 export type DatasetExample = { id: string; file: string; index: number; messages: Message[] };
 export type ValidationFinding = { file: string; line: number; level: string; message: string };
@@ -176,6 +180,8 @@ export type CreateProjectParams = {
 };
 
 export type RagCategory = "methods" | "research" | "product" | "other";
+export type RoleName = "viewer" | "operator" | "reviewer" | "admin";
+export type RagCategoryAcl = { category: RagCategory; minimum_role: RoleName };
 export const RAG_CATEGORIES: RagCategory[] = ["methods", "research", "product", "other"];
 export type RagSearchResult = { chunk_id: string; doc_id: string; category: string; text: string; score: number };
 export type RagEvalQuery = { id: string; query: string; relevant_doc_ids: string[] };
@@ -423,18 +429,20 @@ export const api = {
   chat: {
     adapters: (project: string) => request<{ adapters: string[] }>(`${p(project)}/chat/adapters`),
     send: (project: string, message: string, adapter: string | null, rag: boolean, system_prompt?: string,
-           history: { role: "user" | "assistant"; content: string }[] = [], user_context: Record<string, string> = {}) =>
-      request<{ response: string; adapter: string | null; rag_used: boolean; rag_chunks: string[] }>(`${p(project)}/chat`, {
+           history: { role: "user" | "assistant"; content: string }[] = [], user_context: Record<string, string> = {},
+           conversation_id: string | null = null) =>
+      request<{ response: string; adapter: string | null; rag_used: boolean; rag_chunks: string[]; conversation_id: string | null }>(`${p(project)}/chat`, {
         method: "POST",
-        body: JSON.stringify({ message, adapter, rag, system_prompt, history, user_context }),
+        body: JSON.stringify({ message, adapter, rag, system_prompt, history, user_context, conversation_id, persist: conversation_id !== null }),
       }),
     stream: async (project: string, message: string, adapter: string | null, rag: boolean,
                    history: { role: "user" | "assistant"; content: string }[] = [],
                    user_context: Record<string, string> = {},
-                   onEvent: (event: string, payload: Record<string, unknown>) => void) => {
+                   onEvent: (event: string, payload: Record<string, unknown>) => void,
+                   conversation_id: string | null = null, persist = false) => {
       const res = await fetch(`${API_URL}${p(project)}/chat/stream`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, adapter, rag, history, user_context }),
+        body: JSON.stringify({ message, adapter, rag, history, user_context, conversation_id, persist: persist || conversation_id !== null }),
       });
       if (!res.ok) throw new Error(`${res.status} chat stream: ${await res.text().catch(() => res.statusText)}`);
       if (!res.body) throw new Error("Le navigateur ne fournit pas le flux de réponse");
@@ -457,6 +465,17 @@ export const api = {
         if (done) break;
       }
     },
+    conversations: (project: string) => request<ConversationSummary[]>(`${p(project)}/chat/conversations`),
+    createConversation: (project: string, title = "Nouvelle conversation") =>
+      request<ConversationSummary>(`${p(project)}/chat/conversations`, { method: "POST", body: JSON.stringify({ title }) }),
+    getConversation: (project: string, conversationId: string) =>
+      request<ConversationDetail>(`${p(project)}/chat/conversations/${encodeURIComponent(conversationId)}`),
+    renameConversation: (project: string, conversationId: string, title: string) =>
+      request<ConversationSummary>(`${p(project)}/chat/conversations/${encodeURIComponent(conversationId)}`, {
+        method: "PATCH", body: JSON.stringify({ title }),
+      }),
+    deleteConversation: (project: string, conversationId: string) =>
+      request<void>(`${p(project)}/chat/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" }),
   },
 
   rag: {
@@ -489,6 +508,9 @@ export const api = {
       request<{ deleted: boolean }>(`${p(project)}/rag/eval-queries/${encodeURIComponent(id)}`, { method: "DELETE" }),
     evaluate: (project: string, topK = 5) =>
       request<RagEvalResult>(`${p(project)}/rag/evaluate?top_k=${topK}`, { method: "POST" }),
+    acls: (project: string) => request<RagCategoryAcl[]>(`${p(project)}/rag/acls`),
+    updateAcl: (project: string, category: RagCategory, minimum_role: RoleName) =>
+      request<RagCategoryAcl>(`${p(project)}/rag/acls`, { method: "PUT", body: JSON.stringify({ category, minimum_role }) }),
   },
 
   enterprise: {

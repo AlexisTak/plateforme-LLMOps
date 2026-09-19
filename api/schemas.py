@@ -252,6 +252,39 @@ class ChatRequest(BaseModel):
     rag: bool = False
     history: list[ChatTurn] = Field(default_factory=list, max_length=12)
     user_context: dict[Annotated[str, Field(max_length=80)], Annotated[str, Field(max_length=1000)]] = Field(default_factory=dict, max_length=10)
+    # Persists this exchange durably (F05) when set — an existing conversation id owned by
+    # the caller, or None to start (and return) a new one. Omit entirely for a stateless,
+    # non-persisted exchange (unchanged default behaviour for existing callers).
+    conversation_id: str | None = None
+    persist: bool = False
+
+
+class ConversationCreate(BaseModel):
+    title: str = Field(default="Nouvelle conversation", max_length=200)
+
+
+class ConversationRename(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+
+
+class ConversationMessage(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    rag_chunks: list[str] = []
+    created_at: str
+
+
+class ConversationDetail(ConversationSummary):
+    messages: list[ConversationMessage] = []
 
 
 class SystemHealth(BaseModel):
@@ -284,6 +317,7 @@ class ChatResponse(BaseModel):
     rag_used: bool = False
     rag_chunks: list[str] = []
     execution_id: str | None = None
+    conversation_id: str | None = None
 
 
 class RagSearchRequest(BaseModel):
@@ -350,6 +384,21 @@ class RagDocumentCreate(BaseModel):
     filename: str
     category: RagCategory = "other"
     content: str
+
+
+class RagCategoryAcl(BaseModel):
+    """Minimum project role (api.enterprise.ROLES) required to search or list
+    documents in this category — F07 "droits de l'utilisateur", on top of the
+    project-membership check every /rag route already requires. A category with
+    no row defaults to "viewer" (today's behaviour: any project member sees it)."""
+
+    category: RagCategory
+    minimum_role: str
+
+
+class RagCategoryAclUpdate(BaseModel):
+    category: RagCategory
+    minimum_role: str
 
 
 class RagReindexResult(BaseModel):

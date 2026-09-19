@@ -12,9 +12,9 @@ de valeur au MVP actuel.
 | F02 Espaces et rôles | Partiel | Projets isolés, membres et rôles dans le plan de contrôle SQLite |
 | F03 CRUD agents | Couvert | Projets, Settings, activation par registre et archivage |
 | F04 Fournisseurs | Couvert | Registre Ollama, API compatible OpenAI et API compatible Anthropic, secrets par référence d'environnement et test de connexion |
-| F05 Conversation et historique | Partiel | Chat en streaming SSE et exécutions expurgées persistantes; historique conversationnel durable reste à faire |
+| F05 Conversation et historique | Couvert | Chat en streaming SSE, exécutions expurgées persistantes et historique conversationnel durable par conversation (SQLite, isolé par projet et par acteur) |
 | F06 PDF DOCX TXT MD | Couvert | Ingestion, extraction, indexation asynchrone et erreurs explicites |
-| F07 Recherche filtrée | Partiel | Index séparé par projet; espaces multiples et ACL fines restent à faire |
+| F07 Recherche filtrée | Partiel | Index séparé par projet; ACL fines par catégorie et par rôle sur la recherche; espaces multiples (Organization/Workspace) restent hors scope (ADR-0006) |
 | F08 Catalogue d'outils | Couvert | Outils HTTP GET ou POST et MCP Streamable HTTP en lecture, timeout et limite de réponse |
 | F09 Politiques d'outils | Couvert | Règles globales ou ciblées allow, deny et require approval, priorités déterministes et audit des décisions |
 | F10 Approbations | Couvert | Suspension, décision unique et exécution après approbation |
@@ -178,6 +178,63 @@ documenté comme convention durable dans
   `<!DOCTYPE` avant analyse (un vrai `word/document.xml` n'en déclare jamais) —
   ferme à la fois ce vecteur et l'injection d'entité externe (XXE), sans
   ajouter de dépendance de parseur XML durci.
+
+## Historique conversationnel durable (F05, 2026-09-19)
+
+Le chat (`api/routes/chat.py`) restait sans état : `body.history` n'était
+qu'un tampon renvoyé par le client à chaque appel, perdu au rechargement de
+page. Ajouté sans casser de contrat existant :
+
+- **Tables additives** `chat_conversations`/`chat_messages` (`api/enterprise.py`),
+  même schéma additif que le reste du contrôle-plane (indexées, `ON DELETE
+  CASCADE` sur les messages).
+- **Persistance opt-in** : `ChatRequest.persist`/`conversation_id` — un appel
+  qui ne les fournit pas garde le comportement exact d'avant (aucune écriture),
+  un appel qui fournit `persist=true` crée une conversation et retourne son id
+  (`ChatResponse.conversation_id`, aussi dans l'évènement SSE `metadata`/`done`
+  du chat en flux), un appel qui fournit `conversation_id` y ajoute les
+  messages. Isolation par projet et par acteur au niveau du store (une
+  conversation n'est visible/modifiable que par son créateur dans son projet).
+- **Endpoints** `GET/POST .../chat/conversations`, `GET/PATCH/DELETE
+  .../chat/conversations/{id}` — liste, détail avec messages, renommage,
+  suppression.
+- **Web** : `web/src/app/chat/page.tsx` a désormais une barre latérale de
+  conversations (nouvelle conversation, sélection, suppression avec
+  confirmation) ; la conversation active est mémorisée par projet dans
+  `localStorage` pour être restaurée au rechargement — seul son id y est
+  gardé, les messages eux-mêmes viennent du serveur.
+- Couvert par `tests/test_chat_conversations.py` (store : cycle complet,
+  isolation projet/acteur, cascade de suppression, titres).
+
+## ACL fines sur la recherche RAG (F07, 2026-09-19)
+
+F07 du cahier des charges : « Recherche vectorielle filtrée par espace et
+droits de l'utilisateur ». Le volet « espace » (multi-tenant Organization/
+Workspace) reste hors scope (ADR-0006, YAGNI sans besoin concret). Le volet
+« droits de l'utilisateur » était totalement absent : aucune route de
+`api/routes/rag.py` ne vérifiait l'appartenance au projet — n'importe quel
+acteur authentifié pouvait interroger le RAG de n'importe quel projet, même
+sans en être membre. Ajouté sans casser de contrat existant :
+
+- **Appartenance au projet requise sur toutes les routes RAG**
+  (`store.require_project_role`, même motif que le reste du contrôle-plane) —
+  ferme cette lacune. En mode `local` (poste de dev par défaut), l'acteur
+  unique est toujours admin donc rien ne change en pratique pour un usage
+  solo ; l'effet se voit en mode `proxy` multi-utilisateurs.
+- **ACL fines par catégorie** — table additive `rag_category_acls`
+  (`api/enterprise.py`), un rôle minimum par catégorie (`methods`/`research`/
+  `product`/`other`), par défaut `viewer` (comportement actuel inchangé tant
+  que rien n'est configuré). `POST .../rag/search` et `GET .../rag/documents`
+  filtrent leurs résultats aux catégories que le rôle projet de l'acteur
+  couvre ; écrire dans une catégorie restreinte exige le même rôle. Gérable
+  via `GET/PUT .../rag/acls` (admin uniquement), avec une petite UI dans la
+  page RAG.
+- Limite documentée : le filtrage a lieu après la recherche vectorielle (pas
+  de notion d'ACL dans `rag/retriever.py`), donc un acteur très restreint peut
+  recevoir moins de `top_k` résultats que demandé.
+- Couvert par `tests/test_rag_acl.py` (store : défauts, validation, isolation
+  par projet ; routes : filtrage recherche/liste, refus non-membre, admin
+  requis pour modifier une ACL).
 
 ## Budgets par agent (F14, 2026-09-19)
 

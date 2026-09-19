@@ -154,6 +154,10 @@ class EnterpriseStore:
                   enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
                   UNIQUE(project_id, name)
                 );
+                CREATE TABLE IF NOT EXISTS rag_category_acls (
+                  project_id TEXT NOT NULL, category TEXT NOT NULL, minimum_role TEXT NOT NULL,
+                  updated_at TEXT NOT NULL, PRIMARY KEY(project_id, category)
+                );
                 CREATE TABLE IF NOT EXISTS opportunities (
                   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
                   customer_problem TEXT NOT NULL DEFAULT '', proposed_solution TEXT NOT NULL DEFAULT '',
@@ -188,6 +192,16 @@ class EnterpriseStore:
                   project_id TEXT NOT NULL, provider_id TEXT NOT NULL, result_json TEXT NOT NULL,
                   recommended_score INTEGER, created_at TEXT NOT NULL, created_by TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS chat_conversations (
+                  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+                  title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+                  project_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+                  rag_chunks_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+                  UNIQUE(conversation_id, seq)
+                );
             """)
             columns = {row["name"] for row in db.execute("PRAGMA table_info(tools)").fetchall()}
             for name, definition in {
@@ -218,6 +232,8 @@ class EnterpriseStore:
                 CREATE INDEX IF NOT EXISTS tools_project_connector ON tools(project_id, connector_id);
                 CREATE INDEX IF NOT EXISTS opportunity_kpis_opportunity ON opportunity_kpis(opportunity_id);
                 CREATE INDEX IF NOT EXISTS opportunity_analyses_opportunity ON opportunity_ai_analyses(opportunity_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS chat_conversations_project_actor ON chat_conversations(project_id, actor_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS chat_messages_conversation ON chat_messages(conversation_id, seq);
             """)
         self._seed_opportunities_if_empty()
 
@@ -450,6 +466,56 @@ class EnterpriseStore:
         result["events"] = events
         return result
 
+    def create_conversation(self, project_id: str, actor_id: str, title: str) -> str:
+        conversation_id = str(uuid.uuid4())
+        with self._lock, self._connect() as db:
+            db.execute("INSERT INTO chat_conversations(id,project_id,actor_id,title,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+                       (conversation_id, project_id, actor_id, title[:200] or "Nouvelle conversation", now(), now()))
+        return conversation_id
+
+    def add_message(self, project_id: str, conversation_id: str, role: str, content: str,
+                    rag_chunks: list[str] | None = None) -> None:
+        with self._lock, self._connect() as db:
+            seq = db.execute("SELECT COALESCE(MAX(seq),0)+1 FROM chat_messages WHERE conversation_id=?", (conversation_id,)).fetchone()[0]
+            db.execute("INSERT INTO chat_messages(id,conversation_id,project_id,seq,role,content,rag_chunks_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                       (str(uuid.uuid4()), conversation_id, project_id, seq, role, content, json.dumps(rag_chunks or []), now()))
+            db.execute("UPDATE chat_conversations SET updated_at=? WHERE id=? AND project_id=?", (now(), conversation_id, project_id))
+
+    def list_conversations(self, project_id: str, actor_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = self._rows(db.execute("""
+                SELECT c.*, COUNT(m.id) AS message_count
+                FROM chat_conversations c LEFT JOIN chat_messages m ON m.conversation_id = c.id
+                WHERE c.project_id=? AND c.actor_id=?
+                GROUP BY c.id ORDER BY c.updated_at DESC LIMIT ?
+            """, (project_id, actor_id, min(max(limit, 1), 500))).fetchall())
+        return rows
+
+    def conversation(self, project_id: str, actor_id: str, conversation_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM chat_conversations WHERE id=? AND project_id=? AND actor_id=?",
+                             (conversation_id, project_id, actor_id)).fetchone()
+        return dict(row) if row else None
+
+    def conversation_messages(self, conversation_id: str) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = self._rows(db.execute("SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY seq", (conversation_id,)).fetchall())
+        for row in rows:
+            row["rag_chunks"] = json.loads(row.pop("rag_chunks_json"))
+        return rows
+
+    def rename_conversation(self, project_id: str, actor_id: str, conversation_id: str, title: str) -> bool:
+        with self._lock, self._connect() as db:
+            cur = db.execute("UPDATE chat_conversations SET title=?, updated_at=? WHERE id=? AND project_id=? AND actor_id=?",
+                             (title[:200] or "Nouvelle conversation", now(), conversation_id, project_id, actor_id))
+        return cur.rowcount > 0
+
+    def delete_conversation(self, project_id: str, actor_id: str, conversation_id: str) -> bool:
+        with self._lock, self._connect() as db:
+            cur = db.execute("DELETE FROM chat_conversations WHERE id=? AND project_id=? AND actor_id=?",
+                             (conversation_id, project_id, actor_id))
+        return cur.rowcount > 0
+
     def providers(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:
             return self._rows(db.execute("SELECT * FROM providers WHERE project_id=? ORDER BY name", (project_id,)).fetchall())
@@ -601,6 +667,35 @@ class EnterpriseStore:
             return {**result, "effect": "require_approval",
                     "reason": result["reason"] + " (approbation forcée : outil à risque critique)"}
         return result
+
+    RAG_CATEGORIES = ("methods", "research", "product", "other")
+
+    def rag_category_acls(self, project_id: str) -> list[dict[str, Any]]:
+        """One row per RAG category, defaulting to "viewer" (today's behaviour —
+        any project member sees it) for a category with no explicit override."""
+        with self._connect() as db:
+            rows = {row["category"]: row["minimum_role"] for row in db.execute(
+                "SELECT category,minimum_role FROM rag_category_acls WHERE project_id=?", (project_id,)).fetchall()}
+        return [{"category": c, "minimum_role": rows.get(c, "viewer")} for c in self.RAG_CATEGORIES]
+
+    def set_rag_category_acl(self, project_id: str, category: str, minimum_role: str) -> dict[str, Any]:
+        if category not in self.RAG_CATEGORIES:
+            raise HTTPException(400, f"category must be one of {self.RAG_CATEGORIES}")
+        if minimum_role not in ROLES:
+            raise HTTPException(400, "Rôle inconnu")
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO rag_category_acls VALUES (?,?,?,?) "
+                "ON CONFLICT(project_id,category) DO UPDATE SET minimum_role=excluded.minimum_role,updated_at=excluded.updated_at",
+                (project_id, category, minimum_role, now()),
+            )
+        return {"category": category, "minimum_role": minimum_role}
+
+    def rag_categories_allowed(self, project_id: str, actor_role: str) -> set[str]:
+        """Categories `actor_role` clears the minimum_role bar for — what /rag/search
+        and GET /rag/documents filter their results down to."""
+        rank = ROLES.get(actor_role, -1)
+        return {row["category"] for row in self.rag_category_acls(project_id) if ROLES.get(row["minimum_role"], 0) <= rank}
 
     def request_approval(self, project_id: str, tool_id: str, requester_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         approval_id = str(uuid.uuid4())
