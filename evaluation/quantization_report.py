@@ -100,7 +100,7 @@ def main() -> None:
         }
 
     lines = ["# Quantization Report — Biscuits Focus\n"]
-    lines.append(f"Base: experiment_003 (LoRA r=32) merged, converted to GGUF, quantized via Ollama's built-in quantizer.\n")
+    lines.append("Base: experiment_003 (LoRA r=32) merged, converted to GGUF, quantized via Ollama's built-in quantizer.\n")
     lines.append("Note: Q5_K_M is not supported by Ollama's quantizer on this version (supported: F32, F16, Q4_K_S, Q4_K_M, Q8_0) — comparing Q4_K_M / Q8_0 / F16 instead.\n")
     lines.append("| Variant | Size | JSON valid % | Avg tok/s | Avg latency | First load |")
     lines.append("|---|---|---|---|---|---|")

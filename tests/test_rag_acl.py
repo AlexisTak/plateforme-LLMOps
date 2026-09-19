@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.enterprise import EnterpriseStore
@@ -35,16 +36,10 @@ def test_default_acls_are_viewer_for_every_category(tmp_path: Path):
 
 def test_set_rag_category_acl_validates_category_and_role(tmp_path: Path):
     control = EnterpriseStore(tmp_path / "enterprise.db")
-    try:
+    with pytest.raises(HTTPException, match="category must be one of"):
         control.set_rag_category_acl("demo", "not-a-category", "admin")
-        assert False, "should have raised"
-    except Exception as e:
-        assert "category must be one of" in str(e)
-    try:
+    with pytest.raises(HTTPException, match="Rôle inconnu"):
         control.set_rag_category_acl("demo", "product", "superuser")
-        assert False, "should have raised"
-    except Exception as e:
-        assert "Rôle inconnu" in str(e)
 
 
 def test_rag_categories_allowed_respects_minimum_role(tmp_path: Path):

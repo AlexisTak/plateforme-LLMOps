@@ -27,7 +27,7 @@ function ProjectSettingsForm({ projectId, refreshProjects }: { projectId: string
     setSettings(value); setSaved(value); setLoadError(null);
   }, [projectId]);
 
-  useEffect(() => { load().catch((e) => setLoadError(humanError(e))); }, [load]);
+  useEffect(() => { Promise.resolve().then(load).catch((e) => setLoadError(humanError(e))); }, [load]);
 
   const saveAction = useAction((value: ProjectSettings) => api.projects.updateSettings(projectId, value), {
     success: "Réglages enregistrés.",

@@ -17,7 +17,7 @@ from api.model_manager import manager
 from api.paths import project_dir
 from api.routes.enterprise import enforce_agent_budget
 from api.schemas import (ChatRequest, ChatResponse, ConversationCreate, ConversationDetail,
-                          ConversationMessage, ConversationRename, ConversationSummary)
+                          ConversationRename, ConversationSummary)
 from inference.assistant import Assistant
 
 router = APIRouter(prefix="/api/projects/{project_id}/chat", tags=["chat"])
@@ -69,6 +69,26 @@ def _chat_actor(request: Request, project: Path) -> Actor:
     return actor
 
 
+def _prepare_exchange(body: ChatRequest, request: Request, project: Path
+                      ) -> tuple[Actor, str | None, Assistant, str, float]:
+    """Everything /chat and /chat/stream set up identically before generating:
+    (actor, conversation_id, assistant, execution_id, perf_counter start)."""
+    actor = _chat_actor(request, project)
+    if body.adapter is not None and body.adapter not in manager.available_adapters(project):
+        raise HTTPException(400, "Adapter absent de ce projet")
+    enforce_agent_budget(project, "tokens", "duration")
+    conversation_id = _resolve_conversation(body, project.name, actor.id)
+    # F07: the same per-category ACL /rag/search applies, so RAG-grounded chat can't
+    # surface chunks (or doc ids in rag_chunks) from a category this member can't read.
+    allowed = store.rag_categories_allowed(project.name, store.project_role(project.name, actor))
+    assistant = Assistant(project_dir=project, adapter=body.adapter, system_prompt=body.system_prompt,
+                          allowed_categories=allowed)
+    meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
+    execution_id = store.start_execution(project.name, actor.id,
+        meta.get("inference_model") or meta["base_model"], body.adapter, body.rag, len(body.message))
+    return actor, conversation_id, assistant, execution_id, time.perf_counter()
+
+
 @router.get("/adapters")
 def list_adapters(request: Request, project: Path = Depends(project_dir)):
     _chat_actor(request, project)
@@ -117,21 +137,7 @@ def delete_conversation(conversation_id: str, request: Request, project: Path = 
 
 @router.post("", response_model=ChatResponse)
 def chat(body: ChatRequest, request: Request, project: Path = Depends(project_dir)):
-    actor = _chat_actor(request, project)
-    if body.adapter is not None and body.adapter not in manager.available_adapters(project):
-        raise HTTPException(400, "Adapter absent de ce projet")
-    enforce_agent_budget(project, "tokens")
-    enforce_agent_budget(project, "duration")
-    conversation_id = _resolve_conversation(body, project.name, actor.id)
-    # F07: the same per-category ACL /rag/search applies, so RAG-grounded chat can't
-    # surface chunks (or doc ids in rag_chunks) from a category this member can't read.
-    allowed = store.rag_categories_allowed(project.name, store.project_role(project.name, actor))
-    assistant = Assistant(project_dir=project, adapter=body.adapter, system_prompt=body.system_prompt,
-                          allowed_categories=allowed)
-    meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
-    execution_id = store.start_execution(project.name, actor.id,
-        meta.get("inference_model") or meta["base_model"], body.adapter, body.rag, len(body.message))
-    started = time.perf_counter()
+    actor, conversation_id, assistant, execution_id, started = _prepare_exchange(body, request, project)
     try:
         result = assistant.run(body.message, rag=body.rag, max_new_tokens=body.max_new_tokens,
                                history=[turn.model_dump() for turn in body.history], user_context=body.user_context)
@@ -150,21 +156,7 @@ def chat(body: ChatRequest, request: Request, project: Path = Depends(project_di
 
 @router.post("/stream")
 def chat_stream(body: ChatRequest, request: Request, project: Path = Depends(project_dir)):
-    actor = _chat_actor(request, project)
-    if body.adapter is not None and body.adapter not in manager.available_adapters(project):
-        raise HTTPException(400, "Adapter absent de ce projet")
-    enforce_agent_budget(project, "tokens")
-    enforce_agent_budget(project, "duration")
-    conversation_id = _resolve_conversation(body, project.name, actor.id)
-    # F07: the same per-category ACL /rag/search applies, so RAG-grounded chat can't
-    # surface chunks (or doc ids in rag_chunks) from a category this member can't read.
-    allowed = store.rag_categories_allowed(project.name, store.project_role(project.name, actor))
-    assistant = Assistant(project_dir=project, adapter=body.adapter, system_prompt=body.system_prompt,
-                          allowed_categories=allowed)
-    meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
-    execution_id = store.start_execution(project.name, actor.id,
-        meta.get("inference_model") or meta["base_model"], body.adapter, body.rag, len(body.message))
-    started = time.perf_counter()
+    actor, conversation_id, assistant, execution_id, started = _prepare_exchange(body, request, project)
     try:
         iterator, rag_used, rag_chunks = assistant.stream(
             body.message, rag=body.rag, max_new_tokens=body.max_new_tokens,

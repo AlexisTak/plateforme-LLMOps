@@ -63,12 +63,13 @@ export default function OpportunityDetailPage() {
     });
   }, [id]);
 
-  useEffect(() => { refresh().catch((e) => setError(humanError(e))); }, [refresh]);
+  useEffect(() => { Promise.resolve().then(refresh).catch((e) => setError(humanError(e))); }, [refresh]);
 
   useEffect(() => {
-    if (!analysisProjectId) { setProviders([]); return; }
-    api.enterprise.providers(analysisProjectId).then((list) => setProviders(list.filter((p) => p.enabled)))
-      .catch((e) => setError(humanError(e)));
+    const request = analysisProjectId
+      ? api.enterprise.providers(analysisProjectId).then((list) => list.filter((p) => p.enabled))
+      : Promise.resolve([]);
+    request.then(setProviders).catch((e) => setError(humanError(e)));
   }, [analysisProjectId]);
 
   const updateStatusAction = useAction((next: Opportunity["status"]) => api.opportunities.updateStatus(id, next), { success: "Statut mis à jour." });

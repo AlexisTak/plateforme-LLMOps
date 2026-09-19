@@ -221,12 +221,36 @@ def registry_sbom(item_id: str, project: Path = Depends(project_dir)):
     }
 
 
+def _directory_size_gb(root: Path) -> float:
+    """Total size of every regular file under `root`. os.scandir instead of
+    Path.rglob + Path.stat: one directory read per level and, on Windows, the
+    size comes with the directory entry — no extra stat syscall per file. A
+    project holds base models, adapters and GGUF exports, i.e. thousands of
+    files, and this runs on every quota check before a job starts."""
+    total = 0
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue  # vanished mid-scan (a job writing a checkpoint)
+        except OSError:
+            continue
+    return total / 1024 ** 3
+
+
 @router.get("/projects/{project_id}/quota")
 def get_quota(project: Path = Depends(project_dir)):
     quota = store.quota(project.name)
     running = sum(j.status == "running" for j in registry.list(project))
-    used = sum(path.stat().st_size for path in project.rglob("*") if path.is_file()) / 1024 ** 3
-    return {**quota, "running_jobs": running, "storage_used_gb": round(used, 3)}
+    return {**quota, "running_jobs": running, "storage_used_gb": round(_directory_size_gb(project), 3)}
 
 
 @router.put("/projects/{project_id}/quota")
@@ -288,27 +312,29 @@ def enforce_job_quota(project: Path) -> None:
     running = sum(j.status == "running" for j in jobs)
     if running >= quota["max_concurrent_jobs"]:
         raise HTTPException(429, f"Quota atteint : {quota['max_concurrent_jobs']} jobs simultanés maximum")
-    today = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat()
+    today = now()[:10]
     if sum(j.started_at.startswith(today) for j in jobs) >= quota["max_daily_jobs"]:
         raise HTTPException(429, f"Quota quotidien atteint : {quota['max_daily_jobs']} jobs maximum")
-    used_gb = sum(path.stat().st_size for path in project.rglob("*") if path.is_file()) / 1024 ** 3
-    if used_gb >= quota["max_storage_gb"]:
+    # Cheapest checks first — the storage scan walks the whole project tree.
+    if _directory_size_gb(project) >= quota["max_storage_gb"]:
         raise HTTPException(429, f"Quota stockage atteint : {quota['max_storage_gb']} Go maximum")
 
 
-def enforce_agent_budget(project: Path, kind: str) -> None:
-    """F14 — checked before starting a new chat exchange (kind="tokens"/"duration",
-    api/routes/chat.py) or before actually running a tool (kind="tool_calls",
+def enforce_agent_budget(project: Path, *kinds: str) -> None:
+    """F14 — checked before starting a new chat exchange ("tokens", "duration";
+    api/routes/chat.py) or before actually running a tool ("tool_calls",
     execute_tool/decide_approval below). Same before-the-fact style as
     enforce_job_quota: it blocks the *next* call once today's budget is already
-    spent, it doesn't cut a running generation off mid-stream."""
+    spent, it doesn't cut a running generation off mid-stream. Several kinds in
+    one call share a single budget + usage read (two queries instead of two
+    per kind)."""
     budget = store.agent_budget(project.name)
     usage = store.agent_budget_usage(project.name)
-    if kind == "tokens" and usage["tokens_used"] >= budget["max_tokens_per_day"]:
+    if "tokens" in kinds and usage["tokens_used"] >= budget["max_tokens_per_day"]:
         raise HTTPException(429, f"Budget de jetons atteint : {budget['max_tokens_per_day']} jetons/jour maximum")
-    if kind == "duration" and usage["duration_ms_used"] >= budget["max_duration_ms_per_day"]:
+    if "duration" in kinds and usage["duration_ms_used"] >= budget["max_duration_ms_per_day"]:
         raise HTTPException(429, f"Budget de durée atteint : {budget['max_duration_ms_per_day']} ms/jour maximum")
-    if kind == "tool_calls" and usage["tool_calls_used"] >= budget["max_tool_calls_per_day"]:
+    if "tool_calls" in kinds and usage["tool_calls_used"] >= budget["max_tool_calls_per_day"]:
         raise HTTPException(429, f"Budget d'appels d'outils atteint : {budget['max_tool_calls_per_day']} appels/jour maximum")
 
 
@@ -331,13 +357,20 @@ def deployment_manifest(project: Path = Depends(project_dir)):
 def backup_project(request: Request, project: Path = Depends(project_dir)):
     current = actor(request)
     store.require_project_role(project.name, current, "operator")
-    excluded = {"models/base", "models/merged", "models/quantized", "rag/index", "rag/embeddings"}
-    files = [path for path in project.rglob("*") if path.is_file() and not any(str(path.relative_to(project)).startswith(prefix) for prefix in excluded)]
-    manifest = {str(path.relative_to(project)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
+    excluded = ("models/base/", "models/merged/", "models/quantized/", "rag/index/", "rag/embeddings/")
+    # POSIX-style relative paths throughout: they are the manifest keys and the archive
+    # member names, which restore_project compares byte-for-byte. str(Path) gives
+    # backslashes on Windows, which (a) never matched the exclusion prefixes — a backup
+    # silently embedded the multi-GB base model — and (b) never matched the "/"-joined
+    # zip member names, so every restore of a Windows-made backup failed with
+    # « fichier manquant dans l'archive ».
+    relative = {path: path.relative_to(project).as_posix() for path in project.rglob("*") if path.is_file()}
+    files = [path for path, rel in relative.items() if not rel.startswith(excluded)]
+    manifest = {relative[path]: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in files:
-            archive.write(path, f"{project.name}/{path.relative_to(project)}")
+            archive.write(path, f"{project.name}/{relative[path]}")
         archive.writestr(f"{project.name}/BACKUP_MANIFEST.json", json.dumps({"schema_version": 1, "files": manifest}, indent=2))
     store.audit(current.id, "project.backup.created", "project", project.name, project.name, {"files": len(files)})
     return Response(buffer.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{project.name}-backup.zip"'})

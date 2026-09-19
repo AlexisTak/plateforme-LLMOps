@@ -68,11 +68,13 @@ class EnterpriseStore:
     def __init__(self, path: Path = DB_PATH) -> None:
         self.path = path
         self._lock = threading.RLock()
+        # Once, here — not on every _connect(): the store opens a connection per
+        # call, and a mkdir syscall on each of them was pure overhead.
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     @contextmanager
     def _connect(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
@@ -229,6 +231,7 @@ class EnterpriseStore:
                 CREATE INDEX IF NOT EXISTS approvals_project_created ON approvals(project_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS policies_project_target ON tool_policies(project_id, enabled, tool_id);
                 CREATE INDEX IF NOT EXISTS audit_project ON audit_events(project_id);
+                CREATE INDEX IF NOT EXISTS audit_project_action_created ON audit_events(project_id, action, created_at);
                 CREATE INDEX IF NOT EXISTS tools_project_connector ON tools(project_id, connector_id);
                 CREATE INDEX IF NOT EXISTS opportunity_kpis_opportunity ON opportunity_kpis(opportunity_id);
                 CREATE INDEX IF NOT EXISTS opportunity_analyses_opportunity ON opportunity_ai_analyses(opportunity_id, created_at DESC);

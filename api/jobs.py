@@ -45,7 +45,9 @@ class JobRegistry:
     def __init__(self, storage_dir: Path | None = None) -> None:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
-        self._storage_dir = storage_dir if storage_dir is not None else ROOT / ".jobs"
+        # BISCUITS_JOBS_DIR mirrors BISCUITS_ENTERPRISE_DB: lets tests (tests/conftest.py)
+        # and containers keep job history out of the source tree.
+        self._storage_dir = storage_dir if storage_dir is not None else Path(os.getenv("BISCUITS_JOBS_DIR", ROOT / ".jobs"))
         self._threads: dict[str, threading.Thread] = {}
         self._reindex_pending: set[str] = set()  # project_dir keys with a reindex queued
         self._reindex_lock = threading.Lock()
