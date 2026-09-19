@@ -14,7 +14,7 @@ de valeur au MVP actuel.
 | F04 Fournisseurs | Couvert | Registre Ollama, API compatible OpenAI et API compatible Anthropic, secrets par référence d'environnement et test de connexion |
 | F05 Conversation et historique | Couvert | Chat en streaming SSE, exécutions expurgées persistantes et historique conversationnel durable par conversation (SQLite, isolé par projet et par acteur) |
 | F06 PDF DOCX TXT MD | Couvert | Ingestion, extraction, indexation asynchrone et erreurs explicites |
-| F07 Recherche filtrée | Partiel | Index séparé par projet; espaces multiples et ACL fines restent à faire |
+| F07 Recherche filtrée | Partiel | Index séparé par projet; ACL fines par catégorie et par rôle sur la recherche; espaces multiples (Organization/Workspace) restent hors scope (ADR-0006) |
 | F08 Catalogue d'outils | Couvert | Outils HTTP GET ou POST et MCP Streamable HTTP en lecture, timeout et limite de réponse |
 | F09 Politiques d'outils | Couvert | Règles globales ou ciblées allow, deny et require approval, priorités déterministes et audit des décisions |
 | F10 Approbations | Couvert | Suspension, décision unique et exécution après approbation |
@@ -205,6 +205,36 @@ page. Ajouté sans casser de contrat existant :
   gardé, les messages eux-mêmes viennent du serveur.
 - Couvert par `tests/test_chat_conversations.py` (store : cycle complet,
   isolation projet/acteur, cascade de suppression, titres).
+
+## ACL fines sur la recherche RAG (F07, 2026-09-19)
+
+F07 du cahier des charges : « Recherche vectorielle filtrée par espace et
+droits de l'utilisateur ». Le volet « espace » (multi-tenant Organization/
+Workspace) reste hors scope (ADR-0006, YAGNI sans besoin concret). Le volet
+« droits de l'utilisateur » était totalement absent : aucune route de
+`api/routes/rag.py` ne vérifiait l'appartenance au projet — n'importe quel
+acteur authentifié pouvait interroger le RAG de n'importe quel projet, même
+sans en être membre. Ajouté sans casser de contrat existant :
+
+- **Appartenance au projet requise sur toutes les routes RAG**
+  (`store.require_project_role`, même motif que le reste du contrôle-plane) —
+  ferme cette lacune. En mode `local` (poste de dev par défaut), l'acteur
+  unique est toujours admin donc rien ne change en pratique pour un usage
+  solo ; l'effet se voit en mode `proxy` multi-utilisateurs.
+- **ACL fines par catégorie** — table additive `rag_category_acls`
+  (`api/enterprise.py`), un rôle minimum par catégorie (`methods`/`research`/
+  `product`/`other`), par défaut `viewer` (comportement actuel inchangé tant
+  que rien n'est configuré). `POST .../rag/search` et `GET .../rag/documents`
+  filtrent leurs résultats aux catégories que le rôle projet de l'acteur
+  couvre ; écrire dans une catégorie restreinte exige le même rôle. Gérable
+  via `GET/PUT .../rag/acls` (admin uniquement), avec une petite UI dans la
+  page RAG.
+- Limite documentée : le filtrage a lieu après la recherche vectorielle (pas
+  de notion d'ACL dans `rag/retriever.py`), donc un acteur très restreint peut
+  recevoir moins de `top_k` résultats que demandé.
+- Couvert par `tests/test_rag_acl.py` (store : défauts, validation, isolation
+  par projet ; routes : filtrage recherche/liste, refus non-membre, admin
+  requis pour modifier une ACL).
 
 ## Prochain lot prioritaire
 

@@ -149,6 +149,10 @@ class EnterpriseStore:
                   enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
                   UNIQUE(project_id, name)
                 );
+                CREATE TABLE IF NOT EXISTS rag_category_acls (
+                  project_id TEXT NOT NULL, category TEXT NOT NULL, minimum_role TEXT NOT NULL,
+                  updated_at TEXT NOT NULL, PRIMARY KEY(project_id, category)
+                );
                 CREATE TABLE IF NOT EXISTS opportunities (
                   id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
                   customer_problem TEXT NOT NULL DEFAULT '', proposed_solution TEXT NOT NULL DEFAULT '',
@@ -622,6 +626,35 @@ class EnterpriseStore:
             return {**result, "effect": "require_approval",
                     "reason": result["reason"] + " (approbation forcée : outil à risque critique)"}
         return result
+
+    RAG_CATEGORIES = ("methods", "research", "product", "other")
+
+    def rag_category_acls(self, project_id: str) -> list[dict[str, Any]]:
+        """One row per RAG category, defaulting to "viewer" (today's behaviour —
+        any project member sees it) for a category with no explicit override."""
+        with self._connect() as db:
+            rows = {row["category"]: row["minimum_role"] for row in db.execute(
+                "SELECT category,minimum_role FROM rag_category_acls WHERE project_id=?", (project_id,)).fetchall()}
+        return [{"category": c, "minimum_role": rows.get(c, "viewer")} for c in self.RAG_CATEGORIES]
+
+    def set_rag_category_acl(self, project_id: str, category: str, minimum_role: str) -> dict[str, Any]:
+        if category not in self.RAG_CATEGORIES:
+            raise HTTPException(400, f"category must be one of {self.RAG_CATEGORIES}")
+        if minimum_role not in ROLES:
+            raise HTTPException(400, "Rôle inconnu")
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO rag_category_acls VALUES (?,?,?,?) "
+                "ON CONFLICT(project_id,category) DO UPDATE SET minimum_role=excluded.minimum_role,updated_at=excluded.updated_at",
+                (project_id, category, minimum_role, now()),
+            )
+        return {"category": category, "minimum_role": minimum_role}
+
+    def rag_categories_allowed(self, project_id: str, actor_role: str) -> set[str]:
+        """Categories `actor_role` clears the minimum_role bar for — what /rag/search
+        and GET /rag/documents filter their results down to."""
+        rank = ROLES.get(actor_role, -1)
+        return {row["category"] for row in self.rag_category_acls(project_id) if ROLES.get(row["minimum_role"], 0) <= rank}
 
     def request_approval(self, project_id: str, tool_id: str, requester_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         approval_id = str(uuid.uuid4())

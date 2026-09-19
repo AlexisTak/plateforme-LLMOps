@@ -180,6 +180,8 @@ export type CreateProjectParams = {
 };
 
 export type RagCategory = "methods" | "research" | "product" | "other";
+export type RoleName = "viewer" | "operator" | "reviewer" | "admin";
+export type RagCategoryAcl = { category: RagCategory; minimum_role: RoleName };
 export const RAG_CATEGORIES: RagCategory[] = ["methods", "research", "product", "other"];
 export type RagSearchResult = { chunk_id: string; doc_id: string; category: string; text: string; score: number };
 export type RagEvalQuery = { id: string; query: string; relevant_doc_ids: string[] };
@@ -502,6 +504,9 @@ export const api = {
       request<{ deleted: boolean }>(`${p(project)}/rag/eval-queries/${encodeURIComponent(id)}`, { method: "DELETE" }),
     evaluate: (project: string, topK = 5) =>
       request<RagEvalResult>(`${p(project)}/rag/evaluate?top_k=${topK}`, { method: "POST" }),
+    acls: (project: string) => request<RagCategoryAcl[]>(`${p(project)}/rag/acls`),
+    updateAcl: (project: string, category: RagCategory, minimum_role: RoleName) =>
+      request<RagCategoryAcl>(`${p(project)}/rag/acls`, { method: "PUT", body: JSON.stringify({ category, minimum_role }) }),
   },
 
   enterprise: {
