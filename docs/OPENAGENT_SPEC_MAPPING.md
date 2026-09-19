@@ -20,7 +20,7 @@ de valeur au MVP actuel.
 | F10 Approbations | Couvert | Suspension, décision unique et exécution après approbation |
 | F11 Traces et export | Couvert | Modèle, durée, volume, RAG, statut et chronologie d’événements persistés, détail interactif et export JSON versionné |
 | F12 Audit | Couvert | Journal SQLite append-only applicatif avec chaîne de hash |
-| F14 Budgets | Partiel | Quotas jobs et stockage; budgets jetons par agent restent à faire |
+| F14 Budgets | Couvert | Quotas jobs et stockage; budgets par agent en jetons, durée et nombre d'appels d'outils, réinitialisés chaque jour |
 | F15 Versions et rollback | Couvert | Workflow évalué, approuvé, production, archive et rollback |
 | F18 Évaluation | Couvert | Cas CRUD, rapports, graphiques et comparaison de variantes |
 | NF04 Linux | Couvert | Scripts Linux et fonctionnement local sans SaaS obligatoire |
@@ -235,6 +235,40 @@ sans en être membre. Ajouté sans casser de contrat existant :
 - Couvert par `tests/test_rag_acl.py` (store : défauts, validation, isolation
   par projet ; routes : filtrage recherche/liste, refus non-membre, admin
   requis pour modifier une ACL).
+
+## Budgets par agent (F14, 2026-09-19)
+
+F14 du cahier des charges : « Budgets par agent en jetons, durée et nombre
+d'appels d'outils. » Un « agent » dans ce dépôt est un projet (F03). Les
+quotas existants (`quotas` : jobs simultanés, jobs/jour, stockage) portent sur
+la capacité d'entraînement, pas sur l'usage runtime d'un agent — c'est ce
+volet qui manquait. Ajouté sans casser de contrat existant :
+
+- **Table additive `agent_budgets`** (`api/enterprise.py`) : trois limites
+  quotidiennes par projet — `max_tokens_per_day` (200 000 par défaut),
+  `max_duration_ms_per_day` (7 200 000, soit 2h cumulées, par défaut),
+  `max_tool_calls_per_day` (500 par défaut). Des valeurs volontairement
+  généreuses pour ne rien casser tant qu'un admin ne resserre pas
+  explicitement le budget.
+- **Usage calculé, pas stocké** : jetons et durée viennent de la somme du jour
+  sur `executions` (déjà tracée par le chat) ; les appels d'outils viennent du
+  journal d'audit (`audit_events`, actions `tool.executed` et
+  `tool.approval.approved` — couvre le chemin direct et le chemin
+  approbation-puis-exécution). Repart à zéro chaque jour (UTC), aucune tâche
+  de purge à maintenir.
+- **Application avant l'appel, pas en cours de génération** — même limite
+  documentée que `enforce_job_quota` : une fois le budget du jour dépompé, le
+  *prochain* échange de chat (`POST .../chat`, `.../chat/stream`) ou la
+  *prochaine* exécution d'outil (`POST .../tools/{id}/execute`, une
+  approbation acceptée) est refusée avec HTTP 429 ; un flux déjà en cours
+  n'est pas interrompu.
+- **Gérable via `GET/PUT .../budget`** (admin pour la modification, même
+  garde que `quota`), avec une section dans la page Entreprise du web
+  affichant limites et consommation du jour.
+- Couvert par `tests/test_agent_budget.py` (store : défauts, idempotence,
+  isolation par projet, calcul de l'usage depuis `executions`/`audit_events` ;
+  routes : blocage HTTP 429 sur chat et sur exécution d'outil une fois le
+  budget dépensé, admin requis pour modifier un budget).
 
 ## Prochain lot prioritaire
 

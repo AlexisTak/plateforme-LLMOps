@@ -275,6 +275,10 @@ export type AuditEvent = {
 export type ProjectQuota = {
   project_id: string; max_concurrent_jobs: number; max_daily_jobs: number; max_storage_gb: number; running_jobs?: number; storage_used_gb?: number;
 };
+export type AgentBudget = {
+  project_id: string; max_tokens_per_day: number; max_duration_ms_per_day: number; max_tool_calls_per_day: number;
+  tokens_used?: number; duration_ms_used?: number; tool_calls_used?: number;
+};
 export type ProjectMember = {
   project_id: string; actor_id: string; email: string; name: string;
   role: "viewer" | "operator" | "reviewer" | "admin"; created_at: string;
@@ -518,6 +522,9 @@ export const api = {
     transition: (project: string, id: string, status: ModelVersion["status"]) => request<ModelVersion>(`/api/enterprise/projects/${encodeURIComponent(project)}/registry/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ status }) }),
     quota: (project: string) => request<ProjectQuota>(`/api/enterprise/projects/${encodeURIComponent(project)}/quota`),
     updateQuota: (project: string, quota: Omit<ProjectQuota, "project_id" | "running_jobs">) => request<ProjectQuota>(`/api/enterprise/projects/${encodeURIComponent(project)}/quota`, { method: "PUT", body: JSON.stringify(quota) }),
+    budget: (project: string) => request<AgentBudget>(`/api/enterprise/projects/${encodeURIComponent(project)}/budget`),
+    updateBudget: (project: string, budget: Pick<AgentBudget, "max_tokens_per_day" | "max_duration_ms_per_day" | "max_tool_calls_per_day">) =>
+      request<AgentBudget>(`/api/enterprise/projects/${encodeURIComponent(project)}/budget`, { method: "PUT", body: JSON.stringify(budget) }),
     deployment: (project: string) => request<Record<string, unknown>>(`/api/enterprise/projects/${encodeURIComponent(project)}/deployment`),
     members: (project: string) => request<ProjectMember[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`),
     updateMember: (project: string, member: Pick<ProjectMember, "actor_id" | "email" | "name" | "role">) => request<ProjectMember>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`, { method: "PUT", body: JSON.stringify(member) }),

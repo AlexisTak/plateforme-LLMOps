@@ -42,6 +42,12 @@ class QuotaUpdate(BaseModel):
     max_storage_gb: float = Field(ge=1, le=100000)
 
 
+class AgentBudgetUpdate(BaseModel):
+    max_tokens_per_day: int = Field(ge=1, le=100_000_000)
+    max_duration_ms_per_day: int = Field(ge=1, le=1000 * 60 * 60 * 24 * 30)  # up to 30 days of cumulative duration
+    max_tool_calls_per_day: int = Field(ge=1, le=1_000_000)
+
+
 class MemberUpdate(BaseModel):
     actor_id: str = Field(min_length=1, max_length=200)
     email: str = Field(min_length=3, max_length=320)
@@ -232,6 +238,20 @@ def update_quota(body: QuotaUpdate, request: Request, project: Path = Depends(pr
     return result
 
 
+@router.get("/projects/{project_id}/budget")
+def get_budget(project: Path = Depends(project_dir)):
+    return {**store.agent_budget(project.name), **store.agent_budget_usage(project.name)}
+
+
+@router.put("/projects/{project_id}/budget")
+def update_budget(body: AgentBudgetUpdate, request: Request, project: Path = Depends(project_dir)):
+    current = actor(request)
+    require_role(current, "admin")
+    result = store.set_agent_budget(project.name, body.max_tokens_per_day, body.max_duration_ms_per_day, body.max_tool_calls_per_day)
+    store.audit(current.id, "budget.updated", "project", project.name, project.name, result)
+    return result
+
+
 @router.get("/projects/{project_id}/members")
 def list_members(request: Request, project: Path = Depends(project_dir)):
     current = actor(request)
@@ -272,6 +292,22 @@ def enforce_job_quota(project: Path) -> None:
     used_gb = sum(path.stat().st_size for path in project.rglob("*") if path.is_file()) / 1024 ** 3
     if used_gb >= quota["max_storage_gb"]:
         raise HTTPException(429, f"Quota stockage atteint : {quota['max_storage_gb']} Go maximum")
+
+
+def enforce_agent_budget(project: Path, kind: str) -> None:
+    """F14 — checked before starting a new chat exchange (kind="tokens"/"duration",
+    api/routes/chat.py) or before actually running a tool (kind="tool_calls",
+    execute_tool/decide_approval below). Same before-the-fact style as
+    enforce_job_quota: it blocks the *next* call once today's budget is already
+    spent, it doesn't cut a running generation off mid-stream."""
+    budget = store.agent_budget(project.name)
+    usage = store.agent_budget_usage(project.name)
+    if kind == "tokens" and usage["tokens_used"] >= budget["max_tokens_per_day"]:
+        raise HTTPException(429, f"Budget de jetons atteint : {budget['max_tokens_per_day']} jetons/jour maximum")
+    if kind == "duration" and usage["duration_ms_used"] >= budget["max_duration_ms_per_day"]:
+        raise HTTPException(429, f"Budget de durée atteint : {budget['max_duration_ms_per_day']} ms/jour maximum")
+    if kind == "tool_calls" and usage["tool_calls_used"] >= budget["max_tool_calls_per_day"]:
+        raise HTTPException(429, f"Budget d'appels d'outils atteint : {budget['max_tool_calls_per_day']} appels/jour maximum")
 
 
 @router.get("/projects/{project_id}/deployment")
@@ -521,6 +557,7 @@ def execute_tool(tool_id: str, body: ToolExecute, request: Request, project: Pat
         store.audit(current.id, "tool.approval.requested", "approval", approval["id"], project.name,
                     {"tool_id": tool_id, "policy": decision})
         return {"status": "pending_approval", "approval": approval}
+    enforce_agent_budget(project, "tool_calls")
     result = _execute_tool(tool, body.arguments, project.name)
     store.audit(current.id, "tool.executed", "tool", tool_id, project.name,
                 {"result": result, "policy": decision})
@@ -550,6 +587,7 @@ def decide_approval(approval_id: str, body: ApprovalDecision, request: Request, 
             store.audit(current.id, "tool.policy.denied", "approval", approval_id, project.name,
                         {"tool_id": approval["tool_id"], **policy})
             raise HTTPException(409, "Approbation bloquée : " + policy["reason"])
+        enforce_agent_budget(project, "tool_calls")
         store.claim_approval(project.name, approval_id)
         try:
             result = _execute_tool(tool, approval["arguments"], project.name)
