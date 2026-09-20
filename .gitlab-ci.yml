@@ -10,7 +10,19 @@
 
 stages: [lint, test, build]
 
+# GitLab's managed security scanners (kept from the repository's initial commit).
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+sast:
+  stage: test
+
+secret_detection:
+  stage: test
+
 variables:
+  SECRET_DETECTION_ENABLED: "true"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   npm_config_cache: "$CI_PROJECT_DIR/.cache/npm"
   BISCUITS_AUTH_MODE: "local"
