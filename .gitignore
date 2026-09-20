@@ -40,3 +40,10 @@ prompt.md
 .idea/
 .vscode/
 *.log
+
+# CI/coverage artefacts
+.coverage
+coverage.xml
+htmlcov/
+report.xml
+gl-code-quality-*.json

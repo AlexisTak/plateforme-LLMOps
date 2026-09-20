@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# CI artefacts
+coverage/
+junit.xml
+gl-code-quality-report.json

@@ -1,44 +1,49 @@
-# GitLab CI/CD — mirrors .github/workflows/ci.yml so both hosts run the same gates.
+# GitLab CI/CD for Biscuits Focus.
 #
-# Stages:
-#   lint  → ruff (Python), eslint + tsc (web)      fast feedback
-#   test  → pytest -m "not gpu", vitest            no GPU/HF downloads in CI
-#   build → next build; docker images on main/tags  proves the deployable artefacts
+#   lint     → ruff / eslint + tsc, both exported as Code Quality reports (MR widget)
+#   test     → pytest (JUnit + Cobertura coverage), vitest (JUnit + Cobertura coverage),
+#              GitLab security scanners: SAST, Secret Detection, Dependency Scanning, IaC
+#   build    → next build; docker images api/web pushed to the project registry (main/tags)
+#   scan     → Container Scanning of the freshly built images (main/tags)
+#   release  → GitLab Release on every tag (with the images referenced as links)
+#   pages    → coverage reports published to GitLab Pages from main
 #
-# The GPU-marked tests (tests/test_rag_injection.py) are deliberately excluded:
-# they need CUDA and a 1B model download. Run them manually with `pytest -m gpu`.
+# What is deliberately NOT here: DAST and review apps need a reachable deployment
+# target, which this project does not have yet. GPU-marked tests are excluded
+# (they need CUDA and a 1B model download): run them with `pytest -m gpu` locally.
 
-stages: [lint, test, build]
+stages: [lint, test, build, scan, release, pages]
 
-# GitLab's managed security scanners (kept from the repository's initial commit).
 include:
-  - template: Security/SAST.gitlab-ci.yml
-  - template: Security/Secret-Detection.gitlab-ci.yml
-
-sast:
-  stage: test
-
-secret_detection:
-  stage: test
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+  - template: Jobs/SAST-IaC.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
 
 variables:
-  SECRET_DETECTION_ENABLED: "true"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   npm_config_cache: "$CI_PROJECT_DIR/.cache/npm"
   BISCUITS_AUTH_MODE: "local"
+  SECRET_DETECTION_ENABLED: "true"
+  SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, .venv, node_modules, .next, projects, docs"
+  API_IMAGE: "$CI_REGISTRY_IMAGE/api"
+  WEB_IMAGE: "$CI_REGISTRY_IMAGE/web"
+
+default:
+  interruptible: true
 
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
-    # Avoid duplicate pipelines: branch pushes with an open MR run as MR pipelines only.
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
     - if: $CI_COMMIT_BRANCH
 
 # ---------------------------------------------------------------------------
-# Python
+# Shared setup
 
 .python:
   image: python:3.11-slim
@@ -48,29 +53,8 @@ workflow:
     paths: [.cache/pip]
   before_script:
     - python -m pip install --upgrade pip
-    # CPU wheels only — the CUDA index is never used in CI.
     - pip install torch --index-url https://download.pytorch.org/whl/cpu
-    - pip install -r requirements.txt ruff
-
-lint:python:
-  extends: .python
-  stage: lint
-  script:
-    - ruff check .
-
-test:python:
-  extends: .python
-  stage: test
-  needs: ["lint:python"]
-  script:
-    - python -m pytest -m "not gpu" -q --junitxml=report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: report.xml
-
-# ---------------------------------------------------------------------------
-# Web
+    - pip install -r requirements.txt ruff pytest-cov
 
 .web:
   image: node:22-slim
@@ -82,19 +66,83 @@ test:python:
     - cd web
     - npm ci
 
+.on-main-or-tag:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# ---------------------------------------------------------------------------
+# lint
+
+lint:python:
+  extends: .python
+  stage: lint
+  script:
+    # Report first (never fails), then the real gate.
+    - ruff check . --output-format gitlab > gl-code-quality-python.json || true
+    - ruff check .
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-python.json
+
 lint:web:
   extends: .web
   stage: lint
   script:
+    - npm run lint:ci || true
     - npm run lint
     - npm run typecheck
+  artifacts:
+    when: always
+    reports:
+      codequality: web/gl-code-quality-report.json
+
+# ---------------------------------------------------------------------------
+# test
+
+test:python:
+  extends: .python
+  stage: test
+  needs: ["lint:python"]
+  script:
+    - python -m pytest -m "not gpu" -q
+        --junitxml=report.xml
+        --cov=api --cov=decision --cov=rag --cov=inference --cov=evaluation --cov=scripts
+        --cov-report=term --cov-report=xml:coverage.xml --cov-report=html:htmlcov
+  coverage: '/^TOTAL.+?(\d+\%)$/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [htmlcov]
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
 
 test:web:
   extends: .web
   stage: test
   needs: ["lint:web"]
   script:
-    - npm test
+    - npm run test:ci
+  coverage: '/All files\s*\|\s*([\d.]+)/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [web/coverage]
+    reports:
+      junit: web/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: web/coverage/cobertura-coverage.xml
+
+# The included security templates (SAST, Secret Detection, Dependency Scanning,
+# IaC) already run in the `test` stage with their own rules; nothing to override.
+
+# ---------------------------------------------------------------------------
+# build
 
 build:web:
   extends: .web
@@ -105,31 +153,97 @@ build:web:
   script:
     - npm run build
 
-# ---------------------------------------------------------------------------
-# Docker images (main + tags only): pushed to the project's GitLab registry
-
 .docker:
+  extends: .on-main-or-tag
   image: docker:27
   services: [docker:27-dind]
   stage: build
+  variables:
+    DOCKER_BUILDKIT: "1"
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_TAG
+  script:
+    - docker build --pull -t "$IMAGE:$CI_COMMIT_SHORT_SHA" -t "$IMAGE:latest" $BUILD_ARGS "$CONTEXT"
+    - docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMAGE:latest"
+    - if [ -n "$CI_COMMIT_TAG" ]; then docker tag "$IMAGE:$CI_COMMIT_SHORT_SHA" "$IMAGE:$CI_COMMIT_TAG" && docker push "$IMAGE:$CI_COMMIT_TAG"; fi
 
 build:image:api:
   extends: .docker
   needs: ["test:python"]
-  script:
-    - docker build -t "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA" -t "$CI_REGISTRY_IMAGE/api:latest" .
-    - docker push "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA"
-    - docker push "$CI_REGISTRY_IMAGE/api:latest"
+  variables:
+    IMAGE: "$API_IMAGE"
+    CONTEXT: "."
 
 build:image:web:
   extends: .docker
   needs: ["build:web"]
+  variables:
+    IMAGE: "$WEB_IMAGE"
+    CONTEXT: "web"
+    BUILD_ARGS: "--build-arg NEXT_PUBLIC_API_URL=http://127.0.0.1:8000"
+
+# ---------------------------------------------------------------------------
+# scan — Container Scanning of both images (template job + a second instance)
+
+container_scanning:
+  extends: .on-main-or-tag
+  stage: scan
+  needs: ["build:image:api"]
+  variables:
+    CS_IMAGE: "$API_IMAGE:$CI_COMMIT_SHORT_SHA"
+
+scan:image:web:
+  extends: container_scanning
+  needs: ["build:image:web"]
+  variables:
+    CS_IMAGE: "$WEB_IMAGE:$CI_COMMIT_SHORT_SHA"
+
+# ---------------------------------------------------------------------------
+# release — one GitLab Release per tag, pointing at the images
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: ["build:image:api", "build:image:web"]
+  rules:
+    - if: $CI_COMMIT_TAG
   script:
-    - docker build -t "$CI_REGISTRY_IMAGE/web:$CI_COMMIT_SHORT_SHA" -t "$CI_REGISTRY_IMAGE/web:latest" web
-    - docker push "$CI_REGISTRY_IMAGE/web:$CI_COMMIT_SHORT_SHA"
-    - docker push "$CI_REGISTRY_IMAGE/web:latest"
+    - echo "Releasing $CI_COMMIT_TAG"
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Biscuits Focus $CI_COMMIT_TAG"
+    description: |
+      Images:
+      - `$API_IMAGE:$CI_COMMIT_TAG`
+      - `$WEB_IMAGE:$CI_COMMIT_TAG`
+
+      See docs/OPENAGENT_SPEC_MAPPING.md for the feature log and AUDIT.md for the security status.
+    assets:
+      links:
+        - name: "Container registry"
+          url: "https://$CI_SERVER_HOST/$CI_PROJECT_PATH/container_registry"
+          link_type: image
+
+# ---------------------------------------------------------------------------
+# pages — coverage reports at https://<namespace>.gitlab.io/<project>/
+
+pages:
+  stage: pages
+  image: alpine:3.20
+  needs: ["test:python", "test:web"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - mkdir -p public/python public/web
+    - cp -r htmlcov/. public/python/
+    - cp -r web/coverage/. public/web/ 2>/dev/null || true
+    - |
+      cat > public/index.html <<'EOF'
+      <!doctype html><meta charset="utf-8"><title>Biscuits Focus — coverage</title>
+      <h1>Biscuits Focus — coverage reports</h1>
+      <ul><li><a href="python/index.html">Python (pytest-cov)</a></li>
+      <li><a href="web/cobertura-coverage.xml">Web (vitest, cobertura)</a></li></ul>
+      EOF
+  artifacts:
+    paths: [public]
