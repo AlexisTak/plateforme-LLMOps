@@ -24,7 +24,7 @@ class FakeResponse:
 def test_stateless_mcp_tool_listing(monkeypatch):
     calls = []
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, **kwargs):
         calls.append((url, json, headers, timeout))
         return FakeResponse({"jsonrpc": "2.0", "id": 2, "result": {"tools": [
             {"name": "read_issue", "annotations": {"readOnlyHint": True}},
@@ -41,7 +41,7 @@ def test_stateless_mcp_tool_listing(monkeypatch):
 def test_stateless_mcp_tool_call_sets_routing_headers(monkeypatch):
     captured = {}
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, **kwargs):
         captured.update(headers)
         return FakeResponse({"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "ok"}]}})
 
@@ -55,7 +55,7 @@ def test_stateless_mcp_tool_call_sets_routing_headers(monkeypatch):
 def test_mcp_falls_back_to_legacy_session(monkeypatch):
     calls = []
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, **kwargs):
         calls.append((json, headers))
         if len(calls) == 1:
             return FakeResponse({}, fail=True)

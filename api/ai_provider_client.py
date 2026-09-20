@@ -9,17 +9,20 @@ from typing import Any
 
 import requests
 
+from api.outbound import validate_outbound_url
+
 
 class ProviderCallError(Exception):
     pass
 
 
 def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
+    base_url = validate_outbound_url(provider["base_url"])
     if provider["type"] == "ollama":
         response = requests.post(
-            f"{provider['base_url']}/api/generate",
+            f"{base_url}/api/generate",
             json={"model": provider["model"], "prompt": prompt, "stream": False},
-            timeout=timeout,
+            timeout=timeout, allow_redirects=False,
         )
         response.raise_for_status()
         try:
@@ -40,10 +43,10 @@ def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
 
     if provider["type"] == "anthropic-compatible":
         response = requests.post(
-            f"{provider['base_url']}/v1/messages", headers=headers,
+            f"{base_url}/v1/messages", headers=headers,
             json={"model": provider["model"], "max_tokens": 4000,
                   "messages": [{"role": "user", "content": prompt}]},
-            timeout=timeout,
+            timeout=timeout, allow_redirects=False,
         )
         response.raise_for_status()
         try:
@@ -52,9 +55,9 @@ def generate(provider: dict[str, Any], prompt: str, timeout: int = 60) -> str:
             raise ProviderCallError(f"Réponse Anthropic inattendue : {exc}") from exc
 
     response = requests.post(
-        f"{provider['base_url']}/v1/chat/completions", headers=headers,
+        f"{base_url}/v1/chat/completions", headers=headers,
         json={"model": provider["model"], "messages": [{"role": "user", "content": prompt}]},
-        timeout=timeout,
+        timeout=timeout, allow_redirects=False,
     )
     response.raise_for_status()
     try:

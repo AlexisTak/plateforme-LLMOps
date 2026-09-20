@@ -72,6 +72,37 @@ export type DatasetVersionManifest = { version: string; dataset: string; author:
 export type DatasetVersionDiffEntry = { split: string; id: string; summary: string };
 export type DatasetVersionDiff = { from_version: string; to_version: string; added: DatasetVersionDiffEntry[]; removed: DatasetVersionDiffEntry[]; modified: DatasetVersionDiffEntry[] };
 
+export type DecisionSchema = { name: string; decisions: string[]; confidence: boolean };
+export type DecisionExample = { id: string; file: string; index: number; input: string; decision: string };
+export type DecisionValidationFinding = { file: string; line: number; level: string; message: string };
+export type DecisionValidationResult = { total_examples: number; errors: number; warnings: number; findings: DecisionValidationFinding[] };
+export type DecisionClassStat = { decision: string; count: number };
+export type DecisionDatasetStats = {
+  total_examples: number;
+  by_split: Record<string, number>;
+  classes: DecisionClassStat[];
+  smallest_class: number;
+  largest_class: number;
+  balance_ratio: number | null;
+};
+export type DecisionClassMetric = { decision: string; precision: number; recall: number; f1: number; support: number };
+export type DecisionConfusionRow = { actual: string; predicted: Record<string, number> };
+export type DecisionEvaluationResult = {
+  n: number;
+  accuracy: number;
+  macro_precision: number;
+  macro_recall: number;
+  macro_f1: number;
+  invalid_output_rate: number;
+  per_class: DecisionClassMetric[];
+  confusion_matrix: DecisionConfusionRow[];
+  latency_ms_p50: number;
+  latency_ms_p95: number;
+  generated_at: string;
+};
+export type DecisionResult = { decision: string; confidence: number | null; model: string; latency_ms: number; fallback_used: boolean };
+export type DecisionFallbackConfig = { enabled: boolean; fallback_project_id: string | null; threshold: number };
+
 export type EvalSummaryMetric = {
   n: number;
   plain_text_passed?: number;
@@ -150,6 +181,7 @@ export type Project = {
   base_model: string;
   label: string;
   project_type: "general" | "agent" | "developer" | "business";
+  model_kind: "generation" | "decision";
   purpose: string;
   output_mode: "natural" | "json" | "flexible";
   ollama_equivalent?: string | null;
@@ -174,9 +206,11 @@ export type CreateProjectParams = {
   label?: string;
   base_model: string;
   project_type: Project["project_type"];
+  model_kind?: Project["model_kind"];
   purpose: string;
   output_mode: Project["output_mode"];
   system_prompt?: string;
+  ollama_equivalent?: string | null;
 };
 
 export type RagCategory = "methods" | "research" | "product" | "other";
@@ -384,6 +418,29 @@ export const api = {
     versions: (project: string) => request<DatasetVersionManifest[]>(`${p(project)}/dataset/versions`),
     versionDiff: (project: string, from: string, to: string) =>
       request<DatasetVersionDiff>(`${p(project)}/dataset/versions/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}`),
+  },
+
+  decisionModels: {
+    getSchema: (project: string) => request<DecisionSchema | null>(`${p(project)}/decision/schema`),
+    putSchema: (project: string, schema: DecisionSchema) =>
+      request<DecisionSchema>(`${p(project)}/decision/schema`, { method: "PUT", body: JSON.stringify(schema) }),
+    list: (project: string, split: "train" | "validation" | "test") =>
+      request<DecisionExample[]>(`${p(project)}/decision/dataset/${split}`),
+    add: (project: string, split: "train" | "validation" | "test", input: string, decision: string) =>
+      request<DecisionExample>(`${p(project)}/decision/dataset`, {
+        method: "POST",
+        body: JSON.stringify({ file: `${split}.jsonl`, input, decision }),
+      }),
+    remove: (project: string, split: string, index: number) =>
+      request<{ deleted: boolean }>(`${p(project)}/decision/dataset/${split}/${index}`, { method: "DELETE" }),
+    validate: (project: string) => request<DecisionValidationResult>(`${p(project)}/decision/dataset/validate`),
+    stats: (project: string) => request<DecisionDatasetStats>(`${p(project)}/decision/dataset/stats`),
+    evaluate: (project: string) => request<DecisionEvaluationResult>(`${p(project)}/decision/evaluate`, { method: "POST" }),
+    infer: (project: string, input: string) =>
+      request<DecisionResult>(`${p(project)}/decision/infer`, { method: "POST", body: JSON.stringify({ input }) }),
+    getFallback: (project: string) => request<DecisionFallbackConfig>(`${p(project)}/decision/fallback`),
+    putFallback: (project: string, config: DecisionFallbackConfig) =>
+      request<DecisionFallbackConfig>(`${p(project)}/decision/fallback`, { method: "PUT", body: JSON.stringify(config) }),
   },
 
   experiments: {

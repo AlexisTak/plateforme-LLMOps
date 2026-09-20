@@ -15,6 +15,25 @@ markers = [
     "gpu: requires a CUDA device and loads a model (slow)",
 ]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 140
+extend-exclude = [".venv", "web", "projects", "docs"]
+
+[tool.ruff.lint]
+# Correctness-oriented set only (no style churn on an existing codebase):
+# pyflakes, pycodestyle errors, bugbear, pyupgrade, unused args on defs kept out.
+select = ["E", "F", "B", "UP", "I"]
+ignore = [
+    "E501",  # line length is advisory; long f-strings/SQL are common here
+    "B008",  # `project: Path = Depends(project_dir)` is the FastAPI idiom
+    "E402",  # scripts/ and inference/ insert ROOT into sys.path before importing
+    "B904",  # pre-existing `raise HTTPException(...)` inside except without `from`; tracked in AUDIT.md
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # assert False in tests is fine
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

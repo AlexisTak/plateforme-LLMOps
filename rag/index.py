@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rag.chunker import chunk_all_documents
-from rag.settings import COLLECTION_NAME, EMBEDDING_MODEL, CHUNK_MAX_TOKENS, CHUNK_OVERLAP_TOKENS, PASSAGE_PREFIX
+from rag.settings import CHUNK_MAX_TOKENS, CHUNK_OVERLAP_TOKENS, COLLECTION_NAME, EMBEDDING_MODEL, PASSAGE_PREFIX
 
 
 def build_index(project_dir: Path) -> tuple[int, int]:

@@ -21,4 +21,17 @@ from pathlib import Path
 _session_dir = Path(tempfile.mkdtemp(prefix="biscuits-focus-tests-"))
 os.environ.setdefault("BISCUITS_ENTERPRISE_DB", str(_session_dir / "control-plane.db"))
 os.environ.setdefault("BISCUITS_JOBS_DIR", str(_session_dir / "jobs"))
+# The API defaults to "login" (auth required); tests exercise routes as the local
+# admin unless they monkeypatch a mode themselves (test_auth.py, test_rag_acl.py...).
+os.environ.setdefault("BISCUITS_AUTH_MODE", "local")
+
+import pytest  # noqa: E402  (after the env setup above, on purpose)
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Tests use fictitious hosts (*.test) and mock `requests`, so they must never
+    hit real DNS. Every host resolves to a public address here; tests of the
+    outbound policy itself override this with their own stub."""
+    monkeypatch.setattr("api.outbound._resolve", lambda host, port: {"93.184.216.34"})
 Path(os.environ["BISCUITS_JOBS_DIR"]).mkdir(parents=True, exist_ok=True)

@@ -70,6 +70,9 @@ elif port_is_open 8000; then
   echo "Le port 8000 est occupé par un autre service." >&2
   exit 1
 else
+  # Dev launcher bound to 127.0.0.1: opt into the no-auth "local" mode explicitly
+  # (the API defaults to "login"). Override with BISCUITS_AUTH_MODE=login|proxy.
+  export BISCUITS_AUTH_MODE="${BISCUITS_AUTH_MODE:-local}"
   start_service api "$ROOT" "$PYTHON" -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
 fi
 

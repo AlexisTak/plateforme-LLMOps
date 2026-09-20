@@ -10,10 +10,18 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.jobs import registry
-from api.paths import project_dir
 from api.model_preflight import check_model, require_ready
-from api.schemas import CreateConfigRequest, JobStatus, ModelPreflight, StartPipelineRequest, StartSweepRequest, StartTrainingRequest, TrainingConfigSummary
+from api.paths import project_dir
 from api.routes.enterprise import enforce_job_quota
+from api.schemas import (
+    CreateConfigRequest,
+    JobStatus,
+    ModelPreflight,
+    StartPipelineRequest,
+    StartSweepRequest,
+    StartTrainingRequest,
+    TrainingConfigSummary,
+)
 
 # Real module names from LlamaForCausalLM (see docs/ENVIRONMENT.md) — attention +
 # MLP projections, not guessed. Kept identical across every generated config so

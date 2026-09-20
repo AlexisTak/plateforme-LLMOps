@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-import json
-import os
 import hashlib
 import io
-import shutil
-import zipfile
+import json
+import os
 import re
+import shutil
 import time
+import zipfile
 from pathlib import Path
 
+import requests
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-import requests
 
-from api.enterprise import ROOT, Actor, actor_from_request, metrics, now, require_role, store
+from api.enterprise import ROOT, Actor, actor_from_request, auth_mode, metrics, now, require_role, store
 from api.jobs import registry
 from api.mcp_client import McpError, StreamableHttpClient
+from api.outbound import read_capped, validate_outbound_url
 from api.paths import PROJECTS_DIR, project_dir
 from evaluation.reports import capture_metadata, stale_reasons
 
@@ -106,7 +107,7 @@ def actor(request: Request) -> Actor:
 @router.get("/context")
 def context(request: Request):
     current = actor(request)
-    return {"actor": current.__dict__, "auth_mode": os.getenv("BISCUITS_AUTH_MODE", "local"),
+    return {"actor": current.__dict__, "auth_mode": auth_mode(),
             "audit_chain_valid": store.verify_audit_chain()}
 
 
@@ -144,7 +145,7 @@ def list_versions(project: Path = Depends(project_dir)):
 @router.post("/projects/{project_id}/registry", status_code=201)
 def create_version(body: VersionCreate, request: Request, project: Path = Depends(project_dir)):
     current = actor(request)
-    require_role(current, "operator")
+    store.require_project_role(project.name, current, "operator")
     meta = json.loads((project / "meta.json").read_text(encoding="utf-8"))
     dataset_file = project / "data" / "VERSION"
     dataset_version = dataset_file.read_text(encoding="utf-8").strip() if dataset_file.exists() else None
@@ -169,7 +170,7 @@ def create_version(body: VersionCreate, request: Request, project: Path = Depend
 @router.post("/projects/{project_id}/registry/{item_id}/transition")
 def transition(item_id: str, body: TransitionRequest, request: Request, project: Path = Depends(project_dir)):
     current = actor(request)
-    require_role(current, "reviewer" if body.status in {"approved", "production"} else "operator")
+    store.require_project_role(project.name, current, "reviewer" if body.status in {"approved", "production"} else "operator")
     if body.status not in {"draft", "evaluated", "approved", "production", "archived"}:
         raise HTTPException(400, "Statut inconnu")
     if body.status in {"evaluated", "approved", "production"}:
@@ -348,7 +349,7 @@ def deployment_manifest(project: Path = Depends(project_dir)):
         "model": production["model"], "dataset_version": production["dataset_version"],
         "benchmark_generated_at": production["benchmark_generated_at"],
         "runtime": {"healthcheck": "/api/health", "management_port": 8000},
-        "configuration": {"BISCUITS_AUTH_MODE": os.getenv("BISCUITS_AUTH_MODE", "local"),
+        "configuration": {"BISCUITS_AUTH_MODE": auth_mode(),
                           "BISCUITS_ENTERPRISE_DB": str(store.path)},
     }
 
@@ -462,10 +463,7 @@ def export_execution(execution_id: str, request: Request, project: Path = Depend
 
 
 def _provider_url(value: str) -> str:
-    value = value.rstrip("/")
-    if not re.match(r"^https?://", value):
-        raise HTTPException(400, "L’URL doit commencer par http:// ou https://")
-    return value
+    return validate_outbound_url(value)
 
 
 @router.get("/projects/{project_id}/providers")
@@ -512,10 +510,10 @@ def test_provider(provider_id: str, request: Request, project: Path = Depends(pr
             headers["anthropic-version"] = "2023-06-01"
         else:
             headers["Authorization"] = f"Bearer {secret}"
-    url = provider["base_url"] + ("/api/tags" if provider["type"] == "ollama" else "/v1/models")
+    url = validate_outbound_url(provider["base_url"]) + ("/api/tags" if provider["type"] == "ollama" else "/v1/models")
     started = time.perf_counter()
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=headers, timeout=5, allow_redirects=False)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise HTTPException(502, f"Connexion impossible : {exc}") from exc
@@ -548,15 +546,16 @@ def _execute_tool(tool: dict, arguments: dict, project_id: str) -> dict:
             return {"status_code": 200, "bytes": len(capped), "truncated": len(raw) > len(capped),
                     "preview": capped.decode("utf-8", errors="replace")[:2000],
                     "duration_ms": round((time.perf_counter()-started)*1000, 2), "protocol": "mcp"}
+        url = validate_outbound_url(tool["url"])
         if tool["method"] == "GET":
-            response = requests.get(tool["url"], params=arguments, timeout=tool["timeout_seconds"])
+            response = requests.get(url, params=arguments, timeout=tool["timeout_seconds"], allow_redirects=False, stream=True)
         else:
-            response = requests.post(tool["url"], json=arguments, timeout=tool["timeout_seconds"])
+            response = requests.post(url, json=arguments, timeout=tool["timeout_seconds"], allow_redirects=False, stream=True)
         response.raise_for_status()
+        raw, truncated = read_capped(response, tool["max_response_bytes"])
     except (requests.RequestException, McpError) as exc:
         raise HTTPException(502, f"Échec de l’outil : {exc}") from exc
-    raw = response.content[:tool["max_response_bytes"]]
-    return {"status_code": response.status_code, "bytes": len(raw), "truncated": len(response.content) > len(raw),
+    return {"status_code": response.status_code, "bytes": len(raw), "truncated": truncated,
             "preview": raw.decode("utf-8", errors="replace")[:2000], "duration_ms": round((time.perf_counter()-started)*1000, 2)}
 
 

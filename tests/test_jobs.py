@@ -1,9 +1,9 @@
 """Exercise real process-tree cancellation and durable terminal history, without a model."""
 import json
-from pathlib import Path
 import sys
 import threading
 import time
+from pathlib import Path
 
 import psutil
 import pytest

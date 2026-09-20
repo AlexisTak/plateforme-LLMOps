@@ -5,19 +5,18 @@ all belong to that project alone."""
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from api.enterprise import Actor, actor_from_request, store
 
+from api.enterprise import Actor, actor_from_request, store
 from api.model_manager import manager
 from api.paths import project_dir
 from api.routes.enterprise import enforce_agent_budget
-from api.schemas import (ChatRequest, ChatResponse, ConversationCreate, ConversationDetail,
-                          ConversationRename, ConversationSummary)
+from api.schemas import ChatRequest, ChatResponse, ConversationCreate, ConversationDetail, ConversationRename, ConversationSummary
 from inference.assistant import Assistant
 
 router = APIRouter(prefix="/api/projects/{project_id}/chat", tags=["chat"])

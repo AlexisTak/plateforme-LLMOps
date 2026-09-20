@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 from api.storage import atomic_write_text
 
 SCORING_VERSION = "human-rubric-v2"
@@ -42,7 +43,7 @@ def capture_metadata(project: Path) -> dict:
     files += sorted((project / "models/adapters").glob("*/adapter_model.safetensors"))
     version = project / "data/VERSION"
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "scoring_version": SCORING_VERSION,
         "dataset_version": version.read_text(encoding="utf-8").strip() if version.exists() else None,
         "files": {str(path.relative_to(project)).replace("\\", "/"): fingerprint(path) for path in files},
@@ -119,7 +120,7 @@ def save_report(project: Path, metadata: dict, summary: dict, outputs: dict, mar
     history = directory / "history"
     history.mkdir(exist_ok=True)
     if previous:
-        archive = history / f"previous-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}.json"
+        archive = history / f"previous-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.json"
         archive.write_text(json.dumps(previous, ensure_ascii=False, indent=2), encoding="utf-8")
     for target, content in ((directory / "report.md", markdown),
                             (path, json.dumps(report, ensure_ascii=False, indent=2))):

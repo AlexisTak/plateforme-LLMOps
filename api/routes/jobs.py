@@ -9,10 +9,10 @@ scoped to one project via /api/projects/{project_id}/jobs.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
-from pathlib import Path
 
 from api.jobs import registry
 from api.paths import project_dir

@@ -1,17 +1,17 @@
 """Regression tests for chat history, text evaluation and report provenance (CPU only)."""
+import io
 import json
-from pathlib import Path
 import sys
+import zipfile
+from pathlib import Path
 
 import pytest
-import io
-import zipfile
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api.schemas import ChatRequest
-from evaluation.run import is_refusal, score, aggregate
 from evaluation.reports import capture_metadata, comparison, save_report, stale_reasons
+from evaluation.run import aggregate, is_refusal, score
 from inference.conversation import build_messages
 from inference.router import JSON_SUFFIX, PLAIN_TEXT_SUFFIX, output_suffix
 
@@ -150,9 +150,10 @@ def test_project_creation_scaffolds_the_selected_domain(monkeypatch, tmp_path):
 
 
 def test_project_creation_rejects_an_ollama_model_name(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
     from api.routes import projects
     from api.schemas import CreateProjectRequest
-    from fastapi import HTTPException
 
     monkeypatch.setattr(projects, "PROJECTS_DIR", tmp_path)
     with pytest.raises(HTTPException, match="identifiant HF"):
@@ -208,11 +209,13 @@ def test_api_keeps_legacy_summary_readable_and_marks_it_stale(project):
 
 
 def test_chat_api_forwards_context_and_rejects_foreign_adapter(monkeypatch, project):
+    from types import SimpleNamespace
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from types import SimpleNamespace
-    from api.routes import chat
+
     from api.paths import project_dir
+    from api.routes import chat
 
     received = {}
     class FakeAssistant:
@@ -247,8 +250,9 @@ def test_chat_api_forwards_context_and_rejects_foreign_adapter(monkeypatch, proj
 def test_chat_stream_emits_tokens_and_completes_trace(monkeypatch, project):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.routes import chat
+
     from api.paths import project_dir
+    from api.routes import chat
 
     class FakeAssistant:
         def __init__(self, **kwargs):
@@ -277,6 +281,7 @@ def test_chat_stream_emits_tokens_and_completes_trace(monkeypatch, project):
 @pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:3000"])
 def test_local_browser_origins_are_allowed(origin):
     from fastapi.testclient import TestClient
+
     from api.main import app
 
     with TestClient(app) as client:
@@ -291,9 +296,10 @@ def test_local_browser_origins_are_allowed(origin):
 def test_stream_preparation_failure_marks_execution_failed(monkeypatch, project):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
     from api.enterprise import EnterpriseStore
-    from api.routes import chat
     from api.paths import project_dir
+    from api.routes import chat
 
     class BrokenAssistant:
         def __init__(self, **kwargs):
@@ -315,8 +321,10 @@ def test_stream_preparation_failure_marks_execution_failed(monkeypatch, project)
 
 
 def test_generation_drops_oldest_pairs_to_fit_token_budget(monkeypatch, project):
-    import torch
     from types import SimpleNamespace
+
+    import torch
+
     from api.model_manager import ModelManager
 
     class Inputs(dict):

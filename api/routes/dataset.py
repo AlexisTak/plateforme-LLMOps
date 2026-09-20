@@ -179,7 +179,7 @@ def validate_all(project: Path = Depends(project_dir)):
             seen_hashes.setdefault(h, []).append(f"{path}:{line_no}")
             all_examples.append((obj, str(path), line_no))
 
-    for h, locations in seen_hashes.items():
+    for locations in seen_hashes.values():
         if len(locations) > 1:
             all_findings.append(ValidationFinding(file=locations[0], line=0, level="warning", message=f"duplicate also at: {', '.join(locations[1:])}"))
 

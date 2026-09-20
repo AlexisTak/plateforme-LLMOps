@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -17,7 +18,7 @@ import uuid
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +29,12 @@ from api.opportunities_seed import SEED_OPPORTUNITIES
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.getenv("BISCUITS_ENTERPRISE_DB", ROOT / ".enterprise" / "control-plane.db"))
 ROLES = {"viewer": 0, "operator": 1, "reviewer": 2, "admin": 3}
+# Verified against when an e-mail is unknown, so login timing is identical either way.
+_DUMMY_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO5xMuf1yNUlQgFq1uInKnv4XuGHrjSme"
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(frozen=True)
@@ -42,12 +45,40 @@ class Actor:
     name: str
 
 
+SESSION_COOKIE = "biscuits_session"
+SESSION_TTL_SECONDS = int(os.getenv("BISCUITS_SESSION_TTL_SECONDS", str(12 * 3600)))
+
+
+def auth_mode() -> str:
+    # Safe by default: an API started without BISCUITS_AUTH_MODE requires a session.
+    # "local" (every caller is admin, no auth at all) has to be opted into explicitly
+    # — start.sh/start.ps1 do so for dev, tests/conftest.py for the test session.
+    return os.getenv("BISCUITS_AUTH_MODE", "login").lower()
+
+
+def session_token_from_request(request: Request) -> str | None:
+    """Cookie for the web console, `Authorization: Bearer` for scripts/SDK."""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip() or None
+    return request.cookies.get(SESSION_COOKIE)
+
+
 def actor_from_request(request: Request) -> Actor:
-    mode = os.getenv("BISCUITS_AUTH_MODE", "local").lower()
+    mode = auth_mode()
     if mode == "local":
         return Actor("local-admin", "local@biscuits.invalid", "admin", "Administrateur local")
+    if mode == "login":
+        # F01 — local accounts + server-side sessions (EnterpriseStore.session_actor).
+        # No account can be created through this path: see api/routes/auth.py
+        # (admin-only) and scripts/create_user.py (bootstrap).
+        token = session_token_from_request(request)
+        actor = store.session_actor(token) if token else None
+        if actor is None:
+            raise HTTPException(401, "Connexion requise")
+        return actor
     if mode != "proxy":
-        raise HTTPException(503, "BISCUITS_AUTH_MODE doit valoir local ou proxy")
+        raise HTTPException(503, "BISCUITS_AUTH_MODE doit valoir local, login ou proxy")
     expected = os.getenv("BISCUITS_PROXY_SECRET", "")
     if not expected or request.headers.get("x-biscuits-proxy-secret") != expected:
         raise HTTPException(401, "Identité du proxy absente ou non fiable")
@@ -194,6 +225,15 @@ class EnterpriseStore:
                   project_id TEXT NOT NULL, provider_id TEXT NOT NULL, result_json TEXT NOT NULL,
                   recommended_score INTEGER, created_at TEXT NOT NULL, created_by TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS users (
+                  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL,
+                  password_hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+                  created_at TEXT NOT NULL, last_login_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  created_at TEXT NOT NULL, expires_at TEXT NOT NULL, client TEXT
+                );
                 CREATE TABLE IF NOT EXISTS chat_conversations (
                   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, actor_id TEXT NOT NULL,
                   title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -235,6 +275,7 @@ class EnterpriseStore:
                 CREATE INDEX IF NOT EXISTS tools_project_connector ON tools(project_id, connector_id);
                 CREATE INDEX IF NOT EXISTS opportunity_kpis_opportunity ON opportunity_kpis(opportunity_id);
                 CREATE INDEX IF NOT EXISTS opportunity_analyses_opportunity ON opportunity_ai_analyses(opportunity_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
                 CREATE INDEX IF NOT EXISTS chat_conversations_project_actor ON chat_conversations(project_id, actor_id, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS chat_messages_conversation ON chat_messages(conversation_id, seq);
             """)
@@ -329,7 +370,7 @@ class EnterpriseStore:
                 raise HTTPException(409, f"Transition {row['status']} → {status} non autorisée")
             if status in {"approved", "production"} and not row["benchmark_generated_at"]:
                 raise HTTPException(409, "Un benchmark est requis avant l’approbation")
-            if status == "approved" and os.getenv("BISCUITS_AUTH_MODE", "local").lower() == "proxy" and row["created_by"] == actor.id:
+            if status == "approved" and auth_mode() == "proxy" and row["created_by"] == actor.id:
                 raise HTTPException(409, "La personne qui crée une version ne peut pas aussi l’approuver")
             if status == "production" and not row["approved_at"]:
                 raise HTTPException(409, "La version doit avoir été approuvée avant sa mise en production")
@@ -407,7 +448,7 @@ class EnterpriseStore:
             return db.execute("DELETE FROM project_members WHERE project_id=? AND actor_id=?", (project_id, actor_id)).rowcount > 0
 
     def project_role(self, project_id: str, actor: Actor) -> str | None:
-        if os.getenv("BISCUITS_AUTH_MODE", "local").lower() == "local" or actor.role == "admin":
+        if auth_mode() == "local" or actor.role == "admin":
             return actor.role
         with self._connect() as db:
             row = db.execute("SELECT role FROM project_members WHERE project_id=? AND actor_id=?", (project_id, actor.id)).fetchone()
@@ -518,6 +559,115 @@ class EnterpriseStore:
             cur = db.execute("DELETE FROM chat_conversations WHERE id=? AND project_id=? AND actor_id=?",
                              (conversation_id, project_id, actor_id))
         return cur.rowcount > 0
+
+    # --- F01: local accounts and sessions ------------------------------------
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        import bcrypt  # pinned in requirements.txt; imported lazily, only this path needs it
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
+
+    @staticmethod
+    def check_password(password: str, password_hash: str) -> bool:
+        import bcrypt
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _public_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        user = dict(row)
+        user.pop("password_hash", None)
+        user["enabled"] = bool(user["enabled"])
+        return user
+
+    def create_user(self, email: str, name: str, role: str, password: str) -> dict[str, Any]:
+        email = email.strip().lower()
+        if role not in ROLES:
+            raise HTTPException(400, "Rôle inconnu")
+        if len(password) < 10:
+            raise HTTPException(400, "Mot de passe trop court (10 caractères minimum)")
+        user_id = str(uuid.uuid4())
+        with self._lock, self._connect() as db:
+            if db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+                raise HTTPException(409, "Un compte existe déjà avec cet e-mail")
+            db.execute("INSERT INTO users(id,email,name,role,password_hash,enabled,created_at) VALUES (?,?,?,?,?,1,?)",
+                       (user_id, email, name.strip() or email, role, self.hash_password(password), now()))
+            return self._public_user(db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+
+    def users(self) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            return [self._public_user(row) for row in db.execute("SELECT * FROM users ORDER BY created_at").fetchall()]
+
+    def user_count(self) -> int:
+        with self._connect() as db:
+            return db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+    def user(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return self._public_user(row) if row else None
+
+    def update_user(self, user_id: str, *, role: str | None = None, enabled: bool | None = None,
+                    password: str | None = None, name: str | None = None) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            if not db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+                raise HTTPException(404, "Compte inconnu")
+            if role is not None:
+                if role not in ROLES:
+                    raise HTTPException(400, "Rôle inconnu")
+                db.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+            if enabled is not None:
+                db.execute("UPDATE users SET enabled=? WHERE id=?", (int(enabled), user_id))
+                if not enabled:
+                    db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            if name is not None and name.strip():
+                db.execute("UPDATE users SET name=? WHERE id=?", (name.strip(), user_id))
+            if password is not None:
+                if len(password) < 10:
+                    raise HTTPException(400, "Mot de passe trop court (10 caractères minimum)")
+                db.execute("UPDATE users SET password_hash=? WHERE id=?", (self.hash_password(password), user_id))
+                db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))  # a new password logs every device out
+            return self._public_user(db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+
+    def authenticate(self, email: str, password: str) -> dict[str, Any] | None:
+        """Constant-shape check: an unknown e-mail still costs one bcrypt verify so
+        the response time doesn't reveal whether the account exists."""
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM users WHERE email=?", (email.strip().lower(),)).fetchone()
+        if row is None:
+            self.check_password(password, _DUMMY_HASH)
+            return None
+        if not self.check_password(password, row["password_hash"]) or not row["enabled"]:
+            return None
+        with self._connect() as db:
+            db.execute("UPDATE users SET last_login_at=? WHERE id=?", (now(), row["id"]))
+        return self._public_user(row)
+
+    def create_session(self, user_id: str, client: str | None = None) -> str:
+        """Returns the raw token (only ever sent to the client); the table keeps its
+        SHA-256, so a leaked database doesn't hand out live sessions."""
+        token = secrets.token_urlsafe(32)
+        expires = datetime.fromtimestamp(time.time() + SESSION_TTL_SECONDS, UTC).isoformat()
+        with self._lock, self._connect() as db:
+            db.execute("INSERT INTO sessions VALUES (?,?,?,?,?)",
+                       (hashlib.sha256(token.encode()).hexdigest(), user_id, now(), expires, client))
+            db.execute("DELETE FROM sessions WHERE expires_at < ?", (now(),))
+        return token
+
+    def session_actor(self, token: str) -> Actor | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT u.id,u.email,u.role,u.name FROM sessions s JOIN users u ON u.id=s.user_id "
+                "WHERE s.id=? AND s.expires_at>=? AND u.enabled=1",
+                (hashlib.sha256(token.encode()).hexdigest(), now()),
+            ).fetchone()
+        return Actor(row["id"], row["email"], row["role"], row["name"]) if row else None
+
+    def revoke_session(self, token: str) -> None:
+        with self._lock, self._connect() as db:
+            db.execute("DELETE FROM sessions WHERE id=?", (hashlib.sha256(token.encode()).hexdigest(),))
 
     def providers(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as db:

@@ -57,7 +57,7 @@ def stratified_split(examples: list[tuple[dict, str]], seed: int, ratios=(0.8, 0
 
     rng = random.Random(seed)
     train, val, test = [], [], []
-    for cat, items in by_cat.items():
+    for items in by_cat.values():
         rng.shuffle(items)
         n = len(items)
         n_train = max(1, int(n * ratios[0])) if n >= 3 else n

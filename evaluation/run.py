@@ -18,14 +18,13 @@ import re
 import time
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 import sys
 
 sys.path.insert(0, str(ROOT))
-from inference.router import output_suffix
 from evaluation.reports import capture_metadata, save_report
+from inference.router import output_suffix
 
 # Heuristic, offline (no LLM judge) — same philosophy as the format/concision
 # checks below: cheap signal, not a substitute for the human review rubric
@@ -203,6 +202,7 @@ def aggregate(rows: list[dict]) -> dict:
 
 def main() -> None:
     import argparse
+
     import torch
     from transformers import AutoTokenizer
 

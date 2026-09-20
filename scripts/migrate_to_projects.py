@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,12 +42,12 @@ def main() -> None:
         base_model = first["id"]
         label = "Biscuits Focus (Llama 3.2 1B)"
         ollama_equivalent = first.get("ollama_equivalent")
-        added_at = first.get("added_at", datetime.now(timezone.utc).isoformat())
+        added_at = first.get("added_at", datetime.now(UTC).isoformat())
     else:
         base_model = "unsloth/Llama-3.2-1B-Instruct"
         label = "Biscuits Focus (Llama 3.2 1B)"
         ollama_equivalent = "llama3.2:1b"
-        added_at = datetime.now(timezone.utc).isoformat()
+        added_at = datetime.now(UTC).isoformat()
 
     PROJECT_DIR.mkdir(parents=True)
 

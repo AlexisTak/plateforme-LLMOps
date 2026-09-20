@@ -16,12 +16,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from api.enterprise import Actor, actor_from_request, store
 
+from api.enterprise import Actor, actor_from_request, store
 from api.model_preflight import require_ready
 from api.paths import PROJECTS_DIR, project_dir
 from api.schemas import CreateProjectRequest, Project, ProjectSettings, UpdateInferenceRequest, UpdateProjectSettingsRequest
@@ -45,6 +45,16 @@ PROJECT_TEMPLATES = {
         "intro": "Tu es un assistant professionnel destiné aux entreprises. Reste précis, opérationnel et explicite sur tes incertitudes.",
     },
 }
+
+# Decision Model projects (model_kind="decision", mission §2) are orthogonal to
+# project_type (still used for the intro flavor) — this only overrides the
+# dataset categories and appends the JSON-decision constraint to the intro.
+DECISION_CATEGORIES = ["instructions", "edge-cases"]
+DECISION_INTRO_SUFFIX = (
+    "\n\nTu es un modèle de décision : réponds uniquement par un objet JSON "
+    '{"decision": ..., "confidence": ...}, en choisissant "decision" parmi les '
+    "valeurs autorisées définies pour ce projet — jamais de texte libre ni de valeur hors liste."
+)
 RAG_CATEGORY_DIRS = ["methods", "research", "product", "other"]
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{0,62}$")
 HF_REPO_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
@@ -83,6 +93,8 @@ def _system_prompt(body: CreateProjectRequest) -> str:
     if custom:
         return custom
     intro = PROJECT_TEMPLATES[body.project_type]["intro"]
+    if body.model_kind == "decision":
+        intro += DECISION_INTRO_SUFFIX
     return f"{intro}\n\nTa mission : {body.purpose.strip()}\n\nRespecte cette mission, le contexte fourni et les limites définies par le projet."
 
 
@@ -135,7 +147,8 @@ def create_project(body: CreateProjectRequest, request: Request = None):
         raise HTTPException(409, f"le projet {project_id} existe deja")
 
     template = PROJECT_TEMPLATES[body.project_type]
-    for cat in template["categories"]:
+    categories = DECISION_CATEGORIES if body.model_kind == "decision" else template["categories"]
+    for cat in categories:
         (path / "datasets" / cat).mkdir(parents=True, exist_ok=True)
     for split in ("raw", "cleaned", "train", "validation", "test"):
         (path / "data" / split).mkdir(parents=True, exist_ok=True)
@@ -147,7 +160,12 @@ def create_project(body: CreateProjectRequest, request: Request = None):
     (path / "models" / "merged").mkdir(parents=True, exist_ok=True)
     (path / "models" / "quantized").mkdir(parents=True, exist_ok=True)
     (path / "evaluation").mkdir(parents=True, exist_ok=True)
-    _write_starter_benchmark(path / "evaluation" / "benchmark.jsonl", body.purpose.strip(), body.output_mode)
+    output_mode = "json" if body.model_kind == "decision" else body.output_mode
+    if body.model_kind == "decision":
+        for split in ("train", "validation", "test"):
+            (path / "decision" / "dataset").mkdir(parents=True, exist_ok=True)
+            (path / "decision" / "dataset" / f"{split}.jsonl").touch()
+    _write_starter_benchmark(path / "evaluation" / "benchmark.jsonl", body.purpose.strip(), output_mode)
     (path / "training" / "configs" / "system_prompt.txt").write_text(_system_prompt(body) + "\n", encoding="utf-8")
 
     meta = {
@@ -155,11 +173,12 @@ def create_project(body: CreateProjectRequest, request: Request = None):
         "base_model": body.base_model.strip(),
         "label": (body.label or project_id).strip(),
         "project_type": body.project_type,
+        "model_kind": body.model_kind,
         "purpose": body.purpose.strip(),
-        "output_mode": body.output_mode,
+        "output_mode": output_mode,
         "ollama_equivalent": body.ollama_equivalent,
         "inference_model": body.base_model.strip(),
-        "added_at": datetime.now(timezone.utc).isoformat(),
+        "added_at": datetime.now(UTC).isoformat(),
     }
     (path / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 

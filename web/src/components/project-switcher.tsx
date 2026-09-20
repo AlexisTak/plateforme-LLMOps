@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProject } from "@/lib/project-context";
 import { api, Project } from "@/lib/api";
 import { Input, Select, Textarea } from "@/components/ui";
@@ -22,7 +22,19 @@ export function ProjectSwitcher() {
   const [projectType, setProjectType] = useState<Project["project_type"]>("general");
   const [purpose, setPurpose] = useState("");
   const [outputMode, setOutputMode] = useState<Project["output_mode"]>("natural");
+  const [modelKind, setModelKind] = useState<Project["model_kind"]>("generation");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    dialogRef.current?.focus();
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [open]);
   const createAction = useAction((params: Parameters<typeof api.projects.create>[0]) => api.projects.create(params), {
     success: (created) => `Projet « ${created.label} » créé.`,
   });
@@ -33,8 +45,9 @@ export function ProjectSwitcher() {
       label: newLabel.trim() || undefined,
       base_model: newBaseModel.trim(),
       project_type: projectType,
+      model_kind: modelKind,
       purpose: purpose.trim(),
-      output_mode: outputMode,
+      output_mode: modelKind === "decision" ? "json" : outputMode,
       system_prompt: systemPrompt.trim() || undefined,
     });
     if (created) {
@@ -77,11 +90,28 @@ export function ProjectSwitcher() {
         +
       </button>
       {open && (
-        <div className="absolute top-14 right-4 sm:right-6 bg-surface border border-border rounded-lg p-4 space-y-3 shadow-lg z-20 w-[min(26rem,calc(100vw-2rem))] max-h-[calc(100vh-5rem)] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
+          <div
+            ref={dialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-project-title"
+            className="bg-surface border border-border rounded-lg p-4 space-y-3 shadow-lg w-[min(26rem,calc(100vw-2rem))] max-h-[calc(100vh-5rem)] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+          <h2 id="new-project-title" className="font-display text-base text-text-primary">Nouveau projet</h2>
           <p className="text-text-muted text-xs">
             Crée un modèle pour n’importe quel usage. Sa mission, ses données, son RAG et ses adapters resteront isolés.
           </p>
           {createAction.error && <p className="text-error text-xs">{createAction.error}</p>}
+          <label className="block text-xs text-text-muted space-y-1">
+            Nature du modèle
+            <Select value={modelKind} onChange={(v) => setModelKind(v as Project["model_kind"])} className="w-full">
+              <option value="generation">Génération (texte libre)</option>
+              <option value="decision">Decision Model (décision structurée + confiance)</option>
+            </Select>
+          </label>
           <label className="block text-xs text-text-muted space-y-1">
             Type de modèle
             <Select value={projectType} onChange={(v) => setProjectType(v as Project["project_type"])} className="w-full">
@@ -100,7 +130,7 @@ export function ProjectSwitcher() {
           <Input value={newBaseModel} onChange={setNewBaseModel} placeholder="org/nom-du-modele (HF)" className="w-full" />
           <label className="block text-xs text-text-muted space-y-1">
             Format de réponse
-            <Select value={outputMode} onChange={(v) => setOutputMode(v as Project["output_mode"])} className="w-full">
+            <Select value={modelKind === "decision" ? "json" : outputMode} onChange={(v) => setOutputMode(v as Project["output_mode"])} className="w-full" disabled={modelKind === "decision"}>
               <option value="natural">Texte naturel</option>
               <option value="json">JSON pour une application ou un agent</option>
               <option value="flexible">Flexible selon la demande</option>
@@ -131,6 +161,7 @@ export function ProjectSwitcher() {
             >
               Annuler
             </button>
+          </div>
           </div>
         </div>
       )}

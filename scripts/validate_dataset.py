@@ -139,7 +139,7 @@ def find_near_duplicates(
     rows, cols = similarities.nonzero()
     candidate_pairs = {
         (int(i), int(j))
-        for i, j in zip(rows, cols)
+        for i, j in zip(rows, cols, strict=True)
         if i < j and similarities[i, j] >= 0.4
     }
 
@@ -226,7 +226,7 @@ def main() -> int:
             h = example_key(obj)
             seen_hashes[h].append(f"{path}:{line_no}")
 
-    for h, locations in seen_hashes.items():
+    for locations in seen_hashes.values():
         if len(locations) > 1:
             files_involved = {loc.split(":")[0] for loc in locations}
             level = "error" if (args.check_leakage and len(files_involved) > 1) else "warning"

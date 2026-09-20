@@ -10,7 +10,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      BISCUITS_AUTH_MODE: ${BISCUITS_AUTH_MODE:-local}
+      BISCUITS_AUTH_MODE: ${BISCUITS_AUTH_MODE:-login}
       BISCUITS_PROXY_SECRET: ${BISCUITS_PROXY_SECRET:-}
     volumes:
       - ./projects:/app/projects

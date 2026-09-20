@@ -330,6 +330,29 @@ Passe d'optimisation après la revue post-merge, sans changement de contrat :
   cinq erreurs ESLint préexistantes de la console web corrigées (`npm run
   lint` repasse au vert).
 
+## Decision Models (2026-09-20)
+
+Nouvelle primitive LLMOps `model_kind="decision"`, orthogonale à `project_type` :
+entrée → décision fermée + confiance, au même niveau que Generation/Embedding/
+Reranker. Voir [docs/DECISION_MODELS.md](DECISION_MODELS.md) pour le détail.
+
+- **Réutilisé sans duplication** : pipeline LoRA/QLoRA (`CAUSAL_LM`, pas de tête
+  `SEQ_CLS` séparée — la contrainte de sortie est appliquée au Decision Gateway,
+  pas au training), job runner, dataset versioning, model registry/`transition()`
+  (`artifacts_json` porte les métriques de décision), template de projet.
+- **Nouveau** : `decision/` (schema store, dataset labellisé + validation,
+  métriques accuracy/precision/recall/F1/matrice de confusion/invalid_output_rate,
+  gateway avec fallback vers un autre projet), `api/routes/decision.py`
+  (`/api/projects/{id}/decision/...`, nourrit `/api/v1/...` via l'alias
+  existant), page `web/src/app/decision-models` + `confusion-matrix.tsx`.
+- **Écart assumé vs la mission** : le endpoint public est
+  `/api/projects/{id}/decision/infer`, pas `POST /v1/decisions/{model}` — pour
+  hériter du contrôle de rôle par projet déjà appliqué par le middleware
+  d'audit (`api/main.py`) à toute route `/api/projects/{id}/...`; un chemin
+  `/v1/decisions/{model}` autonome contournerait cette vérification.
+- 19 tests dédiés (`tests/test_decision.py`) + suite complète (207 tests) verte ;
+  `npm run build` (web) vert.
+
 ## Prochain lot prioritaire
 
 Aucun — les 4 lots de la feuille de route (CLAUDE.md §28) sont couverts, dans

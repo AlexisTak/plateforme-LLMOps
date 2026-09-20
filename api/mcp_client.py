@@ -45,7 +45,11 @@ class StreamableHttpClient:
             self.headers["Authorization"] = f"Bearer {token}"
 
     def _post(self, body: dict[str, Any], headers: dict[str, str] | None = None) -> requests.Response:
-        return requests.post(self.url, json=body, headers={**self.headers, **(headers or {})}, timeout=self.timeout)
+        from api.outbound import validate_outbound_url
+
+        url = validate_outbound_url(self.url)
+        return requests.post(url, json=body, headers={**self.headers, **(headers or {})}, timeout=self.timeout,
+                             allow_redirects=False)
 
     def _stateless(self, method: str, params: dict[str, Any], request_id: int) -> dict[str, Any]:
         params = {**params, "_meta": {"io.modelcontextprotocol/clientInfo": {"name": "openagent", "version": "0.1"}}}

@@ -18,8 +18,9 @@ from __future__ import annotations
 import gc
 import json
 import threading
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
+
 
 def _default_base_model(project_dir: Path) -> str:
     """Base model used for chat/eval when no adapter is selected — the
@@ -160,6 +161,7 @@ class ModelManager:
         with self._lock:
             import torch
             from transformers import TextIteratorStreamer
+
             from inference.conversation import build_messages
 
             self._load_locked(project_dir, adapter)

@@ -207,6 +207,7 @@ def test_failed_tool_execution_does_not_leave_approval_processing(tmp_path: Path
 
 def test_execution_export_is_versioned_json(monkeypatch, tmp_path: Path):
     from fastapi import FastAPI
+
     from api.paths import project_dir
     from api.routes import enterprise
 
@@ -227,6 +228,7 @@ def test_execution_export_is_versioned_json(monkeypatch, tmp_path: Path):
 
 def test_registry_sbom_reports_provenance_and_dependencies(monkeypatch, tmp_path: Path):
     from fastapi import FastAPI
+
     from api.paths import project_dir
     from api.routes import enterprise
 
@@ -257,6 +259,7 @@ def test_registry_sbom_reports_provenance_and_dependencies(monkeypatch, tmp_path
 
 def test_registry_sbom_404_for_unknown_version(monkeypatch, tmp_path: Path):
     from fastapi import FastAPI
+
     from api.paths import project_dir
     from api.routes import enterprise
 
@@ -297,6 +300,7 @@ def test_mcp_sync_disables_tools_removed_upstream(tmp_path: Path):
 
 def _restore_client(monkeypatch, tmp_path: Path, source: Path) -> tuple[TestClient, Path]:
     from fastapi import FastAPI
+
     from api.paths import project_dir
     from api.routes import enterprise
 

@@ -9,17 +9,18 @@ with --project-dir pointing at that project's own isolated workspace.
 
 from __future__ import annotations
 
-import subprocess
 import json
+import logging
 import os
 import signal
-import logging
+import subprocess
 import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 from api.storage import atomic_write_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,7 +35,7 @@ class Job:
     config_filename: str | None
     log_path: Path | None
     status: str = "running"  # running | completed | failed | stopped
-    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     finished_at: str | None = None
     return_code: int | None = None
     process: subprocess.Popen | None = None
@@ -195,7 +196,7 @@ class JobRegistry:
             job.return_code = job.process.returncode
             if job.status != "stopped":
                 job.status = "completed" if job.return_code == 0 else "failed"
-            job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
+            job.finished_at = job.finished_at or datetime.now(UTC).isoformat()
             self._persist(job)
 
         if job.kind == "reindex" and job.status == "completed":
@@ -241,7 +242,7 @@ class JobRegistry:
                 except ProcessLookupError:
                     return False
             job.status = "stopped"
-            job.finished_at = datetime.now(timezone.utc).isoformat()
+            job.finished_at = datetime.now(UTC).isoformat()
             self._persist(job)
         if job.kind == "reindex":
             with self._reindex_lock:

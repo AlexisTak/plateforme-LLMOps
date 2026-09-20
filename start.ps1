@@ -70,9 +70,12 @@ if (Test-ApiHealth) {
     exit 1
 } else {
     Write-Host "Starting API on :8000..." -ForegroundColor Cyan
+    # Dev launcher bound to 127.0.0.1: opt into the no-auth "local" mode explicitly
+    # (the API defaults to "login"). Override with $env:BISCUITS_AUTH_MODE = "login"|"proxy".
+    if (-not $env:BISCUITS_AUTH_MODE) { $env:BISCUITS_AUTH_MODE = "local" }
     Start-Process powershell -ArgumentList @(
         "-NoExit", "-Command",
-        "cd '$root'; & '$venvPython' -m uvicorn api.main:app --host 127.0.0.1 --port 8000"
+        "cd '$root'; `$env:BISCUITS_AUTH_MODE = '$($env:BISCUITS_AUTH_MODE)'; & '$venvPython' -m uvicorn api.main:app --host 127.0.0.1 --port 8000"
     )
 }
 

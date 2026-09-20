@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 SPLIT_NAMES = ("train", "validation", "test")
@@ -85,7 +85,7 @@ def snapshot(project: Path, version: str, seed: int, author: str) -> dict:
         "version": version,
         "dataset": project.name,
         "author": author,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "splits": {name: len(examples) for name, examples in splits.items()},
         "example_count": sum(len(examples) for examples in splits.values()),
         "sha256": sha256,

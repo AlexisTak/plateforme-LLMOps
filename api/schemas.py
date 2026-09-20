@@ -416,6 +416,11 @@ class Project(BaseModel):
     base_model: str  # HF repo id used for training/inference in this project
     label: str
     project_type: Literal["general", "agent", "developer", "business"] = "general"
+    # Orthogonal to project_type (dataset template) and output_mode (prompt framing):
+    # this is the model's output *shape*. "decision" projects use output_mode="json"
+    # under the hood but are additionally constrained to a closed DecisionSchema
+    # (mission §2) and gain the /decision/* routes (api/routes/decision.py).
+    model_kind: Literal["generation", "decision"] = "generation"
     purpose: str = "Assistant généraliste"
     output_mode: Literal["natural", "json", "flexible"] = "natural"
     ollama_equivalent: str | None = None
@@ -431,6 +436,7 @@ class CreateProjectRequest(BaseModel):
     base_model: str
     label: str | None = None
     project_type: Literal["general", "agent", "developer", "business"] = "general"
+    model_kind: Literal["generation", "decision"] = "generation"
     purpose: str = Field(min_length=3, max_length=2000)
     output_mode: Literal["natural", "json", "flexible"] = "natural"
     system_prompt: str | None = Field(default=None, max_length=12000)
@@ -439,6 +445,120 @@ class CreateProjectRequest(BaseModel):
 
 class UpdateInferenceRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
+
+
+class DecisionSchema(BaseModel):
+    """Defines the closed set of values a Decision Model may return for a
+    project (mission §2/§3). Stored at projects/<id>/decision/schema.json —
+    one schema per project, since a decision project has exactly one
+    decision surface (unlike RAG categories which are many)."""
+
+    name: str = Field(min_length=1, max_length=200)
+    decisions: list[str] = Field(min_length=2, max_length=100)
+    confidence: bool = True
+
+    def model_post_init(self, __context: Any) -> None:  # dedupe/validate decision labels once, at creation
+        if len(set(self.decisions)) != len(self.decisions):
+            raise ValueError("les valeurs de decisions doivent etre uniques")
+        if any(not d.strip() for d in self.decisions):
+            raise ValueError("une decision ne peut pas etre vide")
+
+
+class DecisionExample(BaseModel):
+    id: str
+    file: str  # split filename: train.jsonl / validation.jsonl / test.jsonl
+    index: int
+    input: str
+    decision: str
+
+
+class AddDecisionExampleRequest(BaseModel):
+    file: str = Field(pattern=r"^(train|validation|test)\.jsonl$")
+    input: str = Field(min_length=1, max_length=20000)
+    decision: str = Field(min_length=1, max_length=200)
+
+
+class UpdateDecisionExampleRequest(BaseModel):
+    input: str = Field(min_length=1, max_length=20000)
+    decision: str = Field(min_length=1, max_length=200)
+
+
+class DecisionValidationFinding(BaseModel):
+    file: str
+    line: int
+    level: str
+    message: str
+
+
+class DecisionValidationResult(BaseModel):
+    total_examples: int
+    errors: int
+    warnings: int
+    findings: list[DecisionValidationFinding]
+
+
+class DecisionClassStat(BaseModel):
+    decision: str
+    count: int
+
+
+class DecisionDatasetStats(BaseModel):
+    total_examples: int
+    by_split: dict[str, int]
+    classes: list[DecisionClassStat]
+    smallest_class: int
+    largest_class: int
+    balance_ratio: float | None  # smallest/largest, None if no examples yet
+
+
+class DecisionRequest(BaseModel):
+    input: str = Field(min_length=1, max_length=20000)
+
+
+class DecisionResult(BaseModel):
+    decision: str
+    confidence: float | None
+    model: str
+    latency_ms: float
+    fallback_used: bool = False
+
+
+class DecisionClassMetric(BaseModel):
+    decision: str
+    precision: float
+    recall: float
+    f1: float
+    support: int
+
+
+class DecisionConfusionRow(BaseModel):
+    actual: str
+    predicted: dict[str, int]
+
+
+class DecisionEvaluationResult(BaseModel):
+    n: int
+    accuracy: float
+    macro_precision: float
+    macro_recall: float
+    macro_f1: float
+    invalid_output_rate: float
+    per_class: list[DecisionClassMetric]
+    confusion_matrix: list[DecisionConfusionRow]
+    latency_ms_p50: float
+    latency_ms_p95: float
+    generated_at: str
+
+
+class DecisionFallbackConfig(BaseModel):
+    """Optional fallback to a generalist model when confidence is too low
+    (mission §9). fallback_project_id must be another project on this
+    instance — keeps the platform self-hosted/provider-agnostic (mission §22)
+    instead of hardcoding a proprietary API."""
+
+    enabled: bool = False
+    fallback_project_id: str | None = None
+    threshold: float = Field(default=0.90, ge=0, le=1)
 
 
 class ProjectSettings(BaseModel):

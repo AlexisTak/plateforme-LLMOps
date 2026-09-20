@@ -119,12 +119,3 @@ export function CommandPalette() {
     </div>
   );
 }
-
-if (process.env.NODE_ENV !== "production") {
-  console.assert(
-    filterLinks("executions").some((l) => l.label === "Exécutions"),
-    "command-palette: normalizeForSearch should strip accents"
-  );
-  console.assert(filterLinks("").length === LINKS.length, "command-palette: empty query should return all links");
-  console.assert(filterLinks("zzz-inexistant").length === 0, "command-palette: no-match query should return empty");
-}

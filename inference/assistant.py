@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

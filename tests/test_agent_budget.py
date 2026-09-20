@@ -153,8 +153,8 @@ def test_execute_tool_blocked_once_tool_call_budget_is_spent(tmp_path: Path):
 def test_chat_blocked_once_token_budget_is_spent(tmp_path: Path):
     project_id = "agent-budget-tokens-regression-test"
     from api.enterprise import store as enterprise_store
-    from api.routes import chat as chat_routes
     from api.paths import project_dir
+    from api.routes import chat as chat_routes
 
     project = tmp_path / project_id
     project.mkdir()
@@ -177,8 +177,8 @@ def test_chat_blocked_once_token_budget_is_spent(tmp_path: Path):
 def test_chat_blocked_once_duration_budget_is_spent(tmp_path: Path):
     project_id = "agent-budget-duration-regression-test"
     from api.enterprise import store as enterprise_store
-    from api.routes import chat as chat_routes
     from api.paths import project_dir
+    from api.routes import chat as chat_routes
 
     project = tmp_path / project_id
     project.mkdir()

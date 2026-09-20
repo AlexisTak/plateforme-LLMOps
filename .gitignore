@@ -3,11 +3,35 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
 
-# Runtime state (control-plane DB, job history) — never source
+# Runtime state (control-plane DB, job history, start.sh pids/logs) — never source
 .enterprise/
 .jobs/
+.run/
+*.db
+*.sqlite
+*.sqlite3
+
+# Model weights and adapters live under projects/<id>/models — far too large for git
+projects/*/models/
+*.safetensors
+*.gguf
+*.pt
+*.bin
+
+# Session/tooling artefacts (.claude/settings.json stays committable for shared hooks)
+.claude/settings.local.json
+.claude/launch.json
+.superpowers/
+.playwright-mcp/
+prompt.md
+
+# Binary documents (the spec .docx was tracked by mistake; see AUDIT.md §6)
+*.docx
+*.pptx
+*.xlsx
 
 # Local env / editor
 .env

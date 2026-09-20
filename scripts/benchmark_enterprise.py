@@ -29,8 +29,12 @@ def main():
                 (str(i), "demo", tool["id"], "demo-user", "pending", '{"query":"demo"}',
                  None, f"2026-01-01T00:00:{i:05}", None, None) for i in range(10000)
             ))
-        previous = lambda: next(item for item in store.approvals("demo") if item["id"] == "0")
-        optimized = lambda: store.approval("demo", "0")
+        def previous():
+            return next(item for item in store.approvals("demo") if item["id"] == "0")
+
+        def optimized():
+            return store.approval("demo", "0")
+
         assert previous() == optimized()
         before, after = measure(previous), measure(optimized)
         print(json.dumps({"rows": 10000, "samples": 15, "median_ms_previous": before,

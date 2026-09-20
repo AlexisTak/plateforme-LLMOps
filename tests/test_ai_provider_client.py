@@ -17,7 +17,7 @@ class FakeResponse:
 def test_generate_ollama(monkeypatch):
     captured = {}
 
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, timeout, **kwargs):
         captured["url"] = url
         captured["json"] = json
         return FakeResponse({"response": "hello"})
@@ -41,7 +41,7 @@ def test_generate_openai_compatible(monkeypatch):
     monkeypatch.setenv("TEST_KEY", "secret")
     captured = {}
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, **kwargs):
         captured["headers"] = headers
         return FakeResponse({"choices": [{"message": {"content": "answer"}}]})
 
@@ -55,7 +55,7 @@ def test_generate_openai_compatible(monkeypatch):
 def test_generate_anthropic_compatible(monkeypatch):
     monkeypatch.setenv("TEST_KEY", "secret")
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, **kwargs):
         return FakeResponse({"content": [{"text": "answer"}]})
 
     monkeypatch.setattr("api.ai_provider_client.requests.post", fake_post)

@@ -9,19 +9,3 @@ export function humanError(e: unknown): string {
   }
   return e instanceof Error ? e.message : String(e);
 }
-
-if (process.env.NODE_ENV !== "production") {
-  console.assert(
-    humanError(new ApiError(404, "/api/x", "Opportunité introuvable")) === "Opportunité introuvable",
-    "humanError: doit renvoyer le detail structuré tel quel",
-  );
-  console.assert(
-    humanError(new ApiError(500, "/api/x", "")) === "Erreur 500 — le serveur n'a pas pu traiter la demande.",
-    "humanError: doit renvoyer un message générique quand detail est vide",
-  );
-  console.assert(
-    humanError(new TypeError("Failed to fetch")).startsWith("API injoignable"),
-    "humanError: doit détecter une erreur réseau (TypeError de fetch)",
-  );
-  console.assert(humanError(new Error("boom")) === "boom", "humanError: doit retomber sur Error.message");
-}

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 
+import requests
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-import requests
 
 from api.ai_provider_client import ProviderCallError, generate
 from api.enterprise import actor_from_request, require_role, store
