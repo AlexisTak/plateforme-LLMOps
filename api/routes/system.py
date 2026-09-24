@@ -15,9 +15,11 @@ import subprocess
 from pathlib import Path
 
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
-from api.schemas import SystemHealth
+from api import outbound
+from api.enterprise import actor_from_request, require_role, store
+from api.schemas import OfflineStatus, OfflineUpdate, SystemHealth
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 REQUIREMENTS_PATH = ROOT / "requirements.txt"
@@ -119,3 +121,25 @@ def health():
         disk=disk,
         ollama=ollama,
     )
+
+
+def _offline_status() -> OfflineStatus:
+    return OfflineStatus(enabled=outbound.offline_mode(), locked=outbound.offline_locked())
+
+
+@router.get("/offline", response_model=OfflineStatus)
+def get_offline():
+    return _offline_status()
+
+
+@router.put("/offline", response_model=OfflineStatus)
+def put_offline(body: OfflineUpdate, request: Request):
+    # Platform-wide network policy: admin only, like providers and tools.
+    current = actor_from_request(request)
+    require_role(current, "admin")
+    if not body.enabled and outbound.offline_locked():
+        raise HTTPException(409, "Mode hors ligne imposé par BISCUITS_OFFLINE dans l’environnement (.env) — "
+                                 "modifiez-le puis redémarrez l’API pour le désactiver")
+    outbound.set_offline(body.enabled)
+    store.audit(current.id, "system.offline.enabled" if body.enabled else "system.offline.disabled", "system", "offline")
+    return _offline_status()

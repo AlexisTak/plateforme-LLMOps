@@ -16,10 +16,25 @@ $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 
 Write-Host "== Biscuits Focus - starting stack ==" -ForegroundColor Cyan
 
+# --- .env (see .env.example) - variables already set in the shell win ------
+
+$envFile = Join-Path $root ".env"
+if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
+            $name = $Matches[1]
+            $value = $Matches[2].Trim('"').Trim("'")
+            if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
+                [Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
+    }
+}
+
 # --- Preflight ---------------------------------------------------------
 
 if (-not (Test-Path $venvPython)) {
-    Write-Host "No .venv found at $venvPython - run setup first (see README.md)." -ForegroundColor Red
+    Write-Host "No .venv found at $venvPython - run .\setup-windows.ps1 first." -ForegroundColor Red
     exit 1
 }
 

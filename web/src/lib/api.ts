@@ -287,6 +287,9 @@ export type SystemHealth = {
   ollama: { running: boolean; models: string[] };
 };
 
+// locked: forced on by BISCUITS_OFFLINE in the server's .env — cannot be turned off from the console.
+export type OfflineStatus = { enabled: boolean; locked: boolean };
+
 export type EnterpriseContext = {
   actor: { id: string; email: string; role: "viewer" | "operator" | "reviewer" | "admin"; name: string };
   auth_mode: "local" | "proxy";
@@ -379,6 +382,10 @@ export type OpportunityAnalysis = {
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
   systemHealth: () => request<SystemHealth>("/api/system/health"),
+  offline: {
+    get: () => request<OfflineStatus>("/api/system/offline"),
+    set: (enabled: boolean) => request<OfflineStatus>("/api/system/offline", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  },
 
   projects: {
     list: () => request<Project[]>("/api/projects"),

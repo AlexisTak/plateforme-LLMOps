@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from api.enterprise import actor_from_request, auth_mode, metrics, require_role, store
 from api.jobs import registry
+from api.outbound import apply_offline_env
 from api.paths import PROJECTS_DIR
 from api.routes import (
     auth,
@@ -38,6 +39,9 @@ from api.routes import (
     system,
     training,
 )
+
+# Offline mode from .env or from the persisted console toggle, before any model loads.
+apply_offline_env()
 
 
 def _bootstrap_admin() -> None:

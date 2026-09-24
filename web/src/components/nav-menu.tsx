@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { OfflineToggle } from "@/components/offline-toggle";
 
 type LinkItem = { href: string; label: string };
 
@@ -70,6 +71,7 @@ export function NavMenu() {
       <SidebarGroup items={PRIMARY} />
       <SidebarGroup heading="Exploiter" items={OPERATE} />
       <SidebarGroup heading="Plateforme" items={PLATFORM} />
+      <OfflineToggle />
     </nav>
   );
 }

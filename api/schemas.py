@@ -296,6 +296,15 @@ class SystemHealth(BaseModel):
     ollama: dict[str, Any]
 
 
+class OfflineStatus(BaseModel):
+    enabled: bool
+    locked: bool  # forced by BISCUITS_OFFLINE in the environment/.env — the toggle can't turn it off
+
+
+class OfflineUpdate(BaseModel):
+    enabled: bool
+
+
 class BenchmarkChecks(BaseModel):
     expect_json: bool = False
     expect_keys: list[str] = Field(default_factory=list)
