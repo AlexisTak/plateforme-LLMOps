@@ -18,6 +18,8 @@ import os
 import tempfile
 from pathlib import Path
 
+# A developer's .env (proxy secret, bootstrap admin...) must not leak into the tests.
+os.environ["BISCUITS_SKIP_DOTENV"] = "1"
 _session_dir = Path(tempfile.mkdtemp(prefix="biscuits-focus-tests-"))
 os.environ.setdefault("BISCUITS_ENTERPRISE_DB", str(_session_dir / "control-plane.db"))
 os.environ.setdefault("BISCUITS_JOBS_DIR", str(_session_dir / "jobs"))

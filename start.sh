@@ -17,6 +17,17 @@ fi
 PYTHON="$ROOT/.venv/bin/python"
 mkdir -p "$RUN_DIR"
 
+# .env (voir .env.example) — les variables déjà définies dans le shell gardent la priorité.
+if [[ -f "$ROOT/.env" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*(.*)$ ]] || continue
+    name="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
+    [[ -z "${!name:-}" ]] && export "$name=$value"
+  done < "$ROOT/.env"
+fi
+
 if [[ ! -x "$PYTHON" ]]; then
   echo "Environnement Python absent: $PYTHON" >&2
   echo "Lancez d'abord ./setup-linux.sh" >&2

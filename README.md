@@ -43,12 +43,36 @@ un autre interpréteur compatible. Python 3.11 reste recommandé pour la pile ML
 
 ### Windows
 
-```bash
-py -3.11 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-pip install -r requirements.txt
+Prérequis : Python 3.11 (avec le lanceur `py`), Node.js 20+ et, pour l'inférence
+locale, [Ollama](https://ollama.com). Puis :
+
+```powershell
+.\setup-windows.ps1        # détecte le GPU NVIDIA (sinon PyTorch CPU)
+# .\setup-windows.ps1 -Cpu   # forcer la variante sans GPU
+# .\setup-windows.ps1 -Force # recréer .venv
+.\start.ps1
 ```
+
+Si l'exécution de scripts est bloquée : `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1`.
+
+### Configuration (.env)
+
+Les deux scripts de setup copient `.env.example` vers `.env` (ignoré par git).
+L'API et `start.ps1`/`start.sh` le lisent ; une variable déjà définie dans le shell
+reste prioritaire. Le fichier désactive par défaut la télémétrie de HuggingFace,
+ChromaDB et Next.js.
+
+**Mode 100 % local** : `BISCUITS_OFFLINE=1` fait refuser par l'API tout appel sortant
+(fournisseurs IA externes, serveurs MCP, outils de projet) sauf les services locaux
+autorisés (Ollama sur 127.0.0.1), et passe HuggingFace/transformers hors ligne.
+Lancez une première fois avec `0` pour télécharger les modèles, puis passez à `1`.
+Le même mode s'active à chaud depuis le bouton **Mode hors ligne** de la barre
+latérale (admin, conservé après redémarrage) ; avec `BISCUITS_OFFLINE=1` il est
+verrouillé et ne peut pas être désactivé depuis la console.
+
+Non versionné, à restaurer sur une nouvelle machine : les poids/adapters
+(`projects/<id>/models/`), l'index RAG (`python -m rag.index`), la base
+`.enterprise/` (comptes : `python scripts/create_user.py`).
 
 ## Project structure
 

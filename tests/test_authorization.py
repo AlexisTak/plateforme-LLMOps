@@ -149,6 +149,34 @@ def test_outbound_allowlist_is_configurable(monkeypatch):
     assert outbound.validate_outbound_url("https://intranet.corp:8443/api") == "https://intranet.corp:8443/api"
 
 
+def test_offline_mode_blocks_public_hosts(monkeypatch):
+    monkeypatch.setenv("BISCUITS_OFFLINE", "1")
+    _stub_resolve(monkeypatch, "93.184.216.34")
+    with pytest.raises(HTTPException) as exc:
+        outbound.validate_outbound_url("https://api.anthropic.test")
+    assert exc.value.status_code == 403
+
+
+def test_offline_mode_keeps_local_ollama(monkeypatch):
+    monkeypatch.setenv("BISCUITS_OFFLINE", "1")
+    _stub_resolve(monkeypatch, "127.0.0.1")
+    assert outbound.validate_outbound_url("http://localhost:11434/") == "http://localhost:11434"
+    with pytest.raises(HTTPException):
+        outbound.validate_outbound_url("http://127.0.0.1:8000")  # loopback but not allowlisted
+
+
+def test_offline_mode_rejects_allowlisted_lan_host(monkeypatch):
+    # An allowlisted intranet service is still off-machine: offline means loopback only.
+    monkeypatch.setenv("BISCUITS_OFFLINE", "1")
+    monkeypatch.setenv("BISCUITS_OUTBOUND_ALLOW_PRIVATE", "intranet.corp:8443,localhost:11434")
+    _stub_resolve(monkeypatch, "10.1.2.3")
+    with pytest.raises(HTTPException):
+        outbound.validate_outbound_url("https://intranet.corp:8443/api")
+    # A hostname that is allowlisted as "localhost" but resolves elsewhere is refused too.
+    with pytest.raises(HTTPException):
+        outbound.validate_outbound_url("http://localhost:11434")
+
+
 @pytest.mark.parametrize("url", ["ftp://x.test", "file:///etc/passwd", "http://", "http://user:pw@x.test", "not a url"])
 def test_outbound_rejects_bad_schemes_and_credentials(monkeypatch, url):
     _stub_resolve(monkeypatch, "93.184.216.34")

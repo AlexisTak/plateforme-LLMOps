@@ -25,5 +25,6 @@ command -v npm >/dev/null || { echo "Node.js/npm est requis pour la console web.
 "$ROOT/.venv/bin/python" -m pip install torch --index-url "$TORCH_INDEX"
 "$ROOT/.venv/bin/python" -m pip install -r "$ROOT/requirements.txt"
 (cd "$ROOT/web" && npm install)
+[[ -f "$ROOT/.env" ]] || cp "$ROOT/.env.example" "$ROOT/.env"
 
 echo "Installation terminée. Lancez ./start.sh"
