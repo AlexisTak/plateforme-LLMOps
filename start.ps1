@@ -34,7 +34,7 @@ if (Test-Path $envFile) {
 # --- Preflight ---------------------------------------------------------
 
 if (-not (Test-Path $venvPython)) {
-    Write-Host "No .venv found at $venvPython - run .\setup-windows.ps1 first." -ForegroundColor Red
+    Write-Host "No .venv found at $venvPython - run .\setup.ps1 first." -ForegroundColor Red
     exit 1
 }
 

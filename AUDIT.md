@@ -206,7 +206,7 @@ Tous les **high** et le **critical** ont été traités, sauf la purge d'histori
 | Drift TS `model_kind` | `Project.model_kind`, `CreateProjectParams.model_kind`/`ollama_equivalent` ; sélecteur « Nature du modèle » dans la modale (force `output_mode=json` pour `decision`) | `web/src/lib/api.ts`, `web/src/components/project-switcher.tsx` |
 | A11y modales | `role="dialog"`, `aria-modal`, `aria-labelledby`, focus initial, fermeture Escape sur la modale projet **et** `ConfirmDialog` ; `ui.tsx` marqué `"use client"` (hooks) | `web/src/components/project-switcher.tsx`, `web/src/components/ui.tsx` |
 | Tests frontend | vitest + jsdom + testing-library ; scripts `test`, `test:watch`, `typecheck` ; `console.assert` migrés en vrais tests + tests `ConfirmDialog`/`StatusBadge`/`ConfusionMatrix` ; `@types/node` → `^22` (peer de vitest 5) | `web/package.json`, `web/vitest.config.mts`, `web/vitest.setup.ts`, `web/src/**/*.test.ts(x)` |
-| CI | GitHub Actions : job backend (ruff + pytest `-m "not gpu"`, torch CPU) et job web (lint + typecheck + test + build) sur push `main` et PR | `.github/workflows/ci.yml` |
+| CI | GitLab CI : ruff + pytest `-m "not gpu"` (torch CPU) et eslint + typecheck + vitest + build, plus scanners de sécurité. Le workflow GitHub Actions initial a été retiré : il ne démarrait jamais sur le dépôt GitHub privé | `.gitlab-ci.yml` |
 | Lint Python | `[tool.ruff]` dans `pyproject.toml` (E, F, B, UP, I ; B008/E402/B904 ignorés avec justification) ; 65 autofix (tri d'imports, `datetime.UTC`) + 6 corrections manuelles | `pyproject.toml`, 12 fichiers |
 | `.gitignore` | `.ruff_cache/`, `.run/`, `*.db`, `projects/*/models/`, poids de modèles, `*.docx`, artefacts de session | `.gitignore` |
 

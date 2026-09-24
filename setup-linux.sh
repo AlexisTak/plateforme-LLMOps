@@ -26,5 +26,8 @@ command -v npm >/dev/null || { echo "Node.js/npm est requis pour la console web.
 "$ROOT/.venv/bin/python" -m pip install -r "$ROOT/requirements.txt"
 (cd "$ROOT/web" && npm install)
 [[ -f "$ROOT/.env" ]] || cp "$ROOT/.env.example" "$ROOT/.env"
+# Mode hors ligne actif par défaut (.env) : les modèles du RAG doivent être en cache avant.
+"$ROOT/.venv/bin/python" "$ROOT/scripts/prefetch_models.py" \
+  || echo "Téléchargement incomplet — relancez : .venv/bin/python scripts/prefetch_models.py" >&2
 
 echo "Installation terminée. Lancez ./start.sh"

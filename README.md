@@ -47,13 +47,13 @@ Prérequis : Python 3.11 (avec le lanceur `py`), Node.js 20+ et, pour l'inféren
 locale, [Ollama](https://ollama.com). Puis :
 
 ```powershell
-.\setup-windows.ps1        # détecte le GPU NVIDIA (sinon PyTorch CPU)
-# .\setup-windows.ps1 -Cpu   # forcer la variante sans GPU
-# .\setup-windows.ps1 -Force # recréer .venv
+.\setup.ps1        # détecte le GPU NVIDIA (sinon PyTorch CPU)
+# .\setup.ps1 -Cpu   # forcer la variante sans GPU
+# .\setup.ps1 -Force # recréer .venv
 .\start.ps1
 ```
 
-Si l'exécution de scripts est bloquée : `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1`.
+Si l'exécution de scripts est bloquée : `powershell -ExecutionPolicy Bypass -File .\setup.ps1`.
 
 ### Configuration (.env)
 
@@ -62,13 +62,16 @@ L'API et `start.ps1`/`start.sh` le lisent ; une variable déjà définie dans le
 reste prioritaire. Le fichier désactive par défaut la télémétrie de HuggingFace,
 ChromaDB et Next.js.
 
-**Mode 100 % local** : `BISCUITS_OFFLINE=1` fait refuser par l'API tout appel sortant
-(fournisseurs IA externes, serveurs MCP, outils de projet) sauf les services locaux
-autorisés (Ollama sur 127.0.0.1), et passe HuggingFace/transformers hors ligne.
-Lancez une première fois avec `0` pour télécharger les modèles, puis passez à `1`.
-Le même mode s'active à chaud depuis le bouton **Mode hors ligne** de la barre
-latérale (admin, conservé après redémarrage) ; avec `BISCUITS_OFFLINE=1` il est
-verrouillé et ne peut pas être désactivé depuis la console.
+**Mode 100 % local, actif par défaut** : `BISCUITS_OFFLINE=1` (valeur de
+`.env.example`) fait refuser par l'API tout appel sortant (fournisseurs IA externes,
+serveurs MCP, outils de projet) sauf les services locaux autorisés (Ollama sur
+127.0.0.1), et passe HuggingFace/transformers hors ligne. Réglé dans `.env`, il est
+verrouillé : le bouton **Mode hors ligne** de la barre latérale ne peut pas le couper.
+Les modèles doivent donc être en cache : les scripts de setup pré-téléchargent ceux du
+RAG ; pour le modèle de base d'un projet :
+`python scripts/prefetch_models.py <repo-hf>`. Pour autoriser les appels externes,
+passez `BISCUITS_OFFLINE=0` et redémarrez ; le bouton permet alors d'activer ou non
+le mode à chaud (admin, conservé après redémarrage).
 
 Non versionné, à restaurer sur une nouvelle machine : les poids/adapters
 (`projects/<id>/models/`), l'index RAG (`python -m rag.index`), la base
