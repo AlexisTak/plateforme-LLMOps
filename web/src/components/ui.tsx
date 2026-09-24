@@ -58,6 +58,10 @@ export function Input({
   className = "",
   onKeyDown,
   disabled,
+  type = "text",
+  autoComplete,
+  autoFocus,
+  required,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -65,6 +69,10 @@ export function Input({
   className?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   disabled?: boolean;
+  type?: "text" | "email" | "password";
+  autoComplete?: string;
+  autoFocus?: boolean;
+  required?: boolean;
 }) {
   return (
     <input
@@ -73,6 +81,10 @@ export function Input({
       placeholder={placeholder}
       onKeyDown={onKeyDown}
       disabled={disabled}
+      type={type}
+      autoComplete={autoComplete}
+      autoFocus={autoFocus}
+      required={required}
       className={`bg-bg border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     />
   );

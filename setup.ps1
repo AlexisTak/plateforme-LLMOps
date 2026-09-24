@@ -122,7 +122,7 @@ Write-Host "`n== Setup complete ==" -ForegroundColor Cyan
 Write-Host "Not in git, to restore on this machine if needed:"
 Write-Host "  - model weights/adapters under projects\<id>\models\ (copy them or retrain)"
 Write-Host "  - RAG index: .venv\Scripts\python -m rag.index"
-Write-Host "  - login mode accounts: .venv\Scripts\python scripts\create_user.py"
+Write-Host "  - accounts (.enterprise): none yet, the console shows a first-run screen to create the admin"
 Write-Host "Offline mode is ON by default (.env: BISCUITS_OFFLINE=1). To cache a project's base model:"
 Write-Host "  .venv\Scripts\python scripts\prefetch_models.py <hf-repo-id>"
 Write-Host "Then run: .\start.ps1"

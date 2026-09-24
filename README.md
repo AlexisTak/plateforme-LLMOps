@@ -75,7 +75,8 @@ le mode à chaud (admin, conservé après redémarrage).
 
 Non versionné, à restaurer sur une nouvelle machine : les poids/adapters
 (`projects/<id>/models/`), l'index RAG (`python -m rag.index`), la base
-`.enterprise/` (comptes : `python scripts/create_user.py`).
+`.enterprise/` (sans elle, la console propose de créer le compte administrateur au
+premier lancement, voir [Comptes et rôles](#comptes-et-rôles)).
 
 ## Project structure
 
@@ -196,8 +197,37 @@ Important : ce pipeline auto-reindex touche uniquement `rag/documents/` (retriev
 
 La page **Entreprise** centralise le registre versionné des modèles, le circuit
 d'approbation, les quotas, les métriques et un journal d'audit chaîné par hash.
-Par défaut, l'application reste utilisable hors ligne avec un administrateur
-local et une base SQLite dans `.enterprise/`.
+Tout est stocké en local dans une base SQLite sous `.enterprise/`.
+
+### Comptes et rôles
+
+Par défaut (`BISCUITS_AUTH_MODE=login`), la console exige une connexion :
+
+1. **Premier lancement** : tant qu'aucun compte n'existe, la console affiche un
+   écran de création du compte administrateur. Il n'est accepté que depuis la
+   machine qui héberge l'API (client en boucle locale, sans en-tête de proxy),
+   pour qu'une installation joignable sur le réseau ne puisse pas être
+   revendiquée par quelqu'un d'autre. Alternatives sans navigateur :
+   `python scripts/create_user.py` ou `BISCUITS_BOOTSTRAP_ADMIN_EMAIL` +
+   `BISCUITS_BOOTSTRAP_ADMIN_PASSWORD`.
+2. **Utilisateurs** (barre latérale, administrateurs) : création des comptes
+   (pas d'inscription publique), rôle global, désactivation (ferme les sessions
+   en cours) et réinitialisation du mot de passe.
+3. **Entreprise → Équipe** : un administrateur du projet y ajoute des comptes
+   existants comme membres, avec un rôle propre au projet. Hors administrateurs
+   globaux, il faut être membre d'un projet pour y accéder.
+
+Rôles, du moins au plus privilégié : `viewer` (consultation), `operator`
+(entraînements, indexations, données), `reviewer` (approbation des versions et
+des outils), `admin` (comptes, politiques, mode hors ligne). Chacun peut changer
+son mot de passe depuis le menu en bas de la barre latérale (toutes ses sessions
+sont alors fermées). Les mots de passe sont hachés (bcrypt), les sessions sont
+stockées côté serveur et la connexion est limitée à 5 échecs par 15 minutes.
+
+`BISCUITS_AUTH_MODE=local` désactive l'authentification (tout appelant est
+administrateur) : à réserver à un usage mono-utilisateur sur la machine locale.
+
+### SSO via proxy
 
 Pour la placer derrière un fournisseur SSO (Entra ID, Okta, Auth0, Google
 Workspace…), faites valider l'identité par votre passerelle puis transmettez les

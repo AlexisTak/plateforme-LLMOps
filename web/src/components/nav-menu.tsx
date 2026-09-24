@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OfflineToggle } from "@/components/offline-toggle";
+import { hasRole, useAuth } from "@/lib/auth-context";
 
-type LinkItem = { href: string; label: string };
+// adminOnly: listed in the sidebar only for admins in "login" mode (the page checks too).
+type LinkItem = { href: string; label: string; adminOnly?: boolean };
 
 // Core lifecycle stages (Dataset -> Training -> Evaluation -> RAG) plus the
 // two most-used surfaces come first; everything else is grouped under its own
@@ -27,6 +29,7 @@ const OPERATE: LinkItem[] = [
 
 const PLATFORM: LinkItem[] = [
   { href: "/enterprise", label: "Entreprise" },
+  { href: "/users", label: "Utilisateurs", adminOnly: true },
   { href: "/providers", label: "Fournisseurs" },
   { href: "/tools", label: "Outils et politiques" },
   { href: "/system", label: "Système" },
@@ -52,10 +55,12 @@ function SidebarLink({ href, label }: LinkItem) {
 }
 
 function SidebarGroup({ heading, items }: { heading?: string; items: LinkItem[] }) {
+  const { state, actor } = useAuth();
+  const canManageUsers = state?.auth_mode === "login" && hasRole(actor, "admin");
   return (
     <div className="space-y-0.5">
       {heading && <p className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-text-muted">{heading}</p>}
-      {items.map((item) => (
+      {items.filter((item) => !item.adminOnly || canManageUsers).map((item) => (
         <SidebarLink key={item.href} {...item} />
       ))}
     </div>
