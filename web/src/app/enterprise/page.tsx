@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AgentBudget, api, AuditEvent, EnterpriseContext, EnterpriseMetrics, ModelVersion, ProjectMember, ProjectQuota } from "@/lib/api";
+import { AgentBudget, api, AuditEvent, EnterpriseContext, EnterpriseMetrics, ModelVersion, ProjectMember, ProjectQuota, type RoleName, type User } from "@/lib/api";
+import { ROLE_LABELS } from "@/lib/auth-context";
 import { useProject } from "@/lib/project-context";
 import { Button, Card, EmptyState, Input, PageHeader, Pill, Select, SectionTitle, Skeleton, StatusBadge } from "@/components/ui";
 import { humanError } from "@/lib/errors";
+
+const ROLE_NAMES: RoleName[] = ["viewer", "operator", "reviewer", "admin"];
+const AUTH_MODE_LABELS: Record<EnterpriseContext["auth_mode"], string> = {
+  local: "Mode local (sans compte)", login: "Comptes locaux", proxy: "SSO via proxy",
+};
 
 const NEXT: Record<ModelVersion["status"], ModelVersion["status"] | null> = {
   draft: "evaluated", evaluated: "approved", approved: "production", production: "archived", archived: "production",
@@ -27,16 +33,21 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
   const [notes, setNotes] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
   const [memberName, setMemberName] = useState("");
+  const [candidates, setCandidates] = useState<Pick<User, "id" | "email" | "name">[]>([]);
+  const [candidateId, setCandidateId] = useState("");
+  const [candidateRole, setCandidateRole] = useState<RoleName>("viewer");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [c, m, v, a, q, b, team] = await Promise.all([
+    const [c, m, v, a, q, b, team, accounts] = await Promise.all([
       api.enterprise.context(), api.enterprise.metrics(), api.enterprise.registry(projectId),
       api.enterprise.audit(projectId), api.enterprise.quota(projectId), api.enterprise.budget(projectId), api.enterprise.members(projectId),
+      // project admins only (403 otherwise): no picker for the others
+      api.enterprise.memberCandidates(projectId).catch(() => []),
     ]);
-    setContext(c); setMetrics(m); setVersions(v); setEvents(a); setQuota(q); setBudget(b); setMembers(team); setError(null);
+    setContext(c); setMetrics(m); setVersions(v); setEvents(a); setQuota(q); setBudget(b); setMembers(team); setCandidates(accounts); setError(null);
     setLoaded(true);
   }, [projectId]);
 
@@ -58,7 +69,7 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {!loaded ? <><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></> : <>
         <Metric label="Identité" value={context ? `${context.actor.name} · ${context.actor.role}` : "…"} />
-        <Metric label="Authentification" value={context?.auth_mode === "proxy" ? "SSO via proxy" : "Mode local"} />
+        <Metric label="Authentification" value={context ? AUTH_MODE_LABELS[context.auth_mode] : "…"} />
         <Metric label="Requêtes · p95" value={metrics ? `${metrics.requests_total ?? 0} · ${metrics.latency_p95_ms} ms` : "…"} />
         <Metric label="Jobs" value={metrics ? `${metrics.jobs_running} actif · ${metrics.jobs_failed} échoué` : "…"} />
       </>}
@@ -67,20 +78,41 @@ function ProjectEnterprise({ projectId }: { projectId: string }) {
     <section>
       <SectionTitle>Équipe et portabilité</SectionTitle>
       <Card className="mb-3 flex flex-wrap gap-2">
-        <Input value={memberName} onChange={setMemberName} placeholder="Nom" className="min-w-40" />
-        <Input value={memberEmail} onChange={setMemberEmail} placeholder="E-mail professionnel" className="flex-1 min-w-56" />
-        <Button disabled={busy || !memberEmail.trim() || !memberName.trim()} onClick={() => act(async () => {
-          const email = memberEmail.trim();
-          await api.enterprise.updateMember(projectId, { actor_id: email.toLowerCase(), email, name: memberName.trim(), role: "viewer" });
-          setMemberEmail(""); setMemberName("");
-        })}>Ajouter comme viewer</Button>
+        {context?.auth_mode === "login" ? <>
+          {/* Members are keyed on the account id: pick an existing account (managed in Utilisateurs). */}
+          <Select value={candidateId} onChange={setCandidateId} disabled={busy} className="flex-1 min-w-56">
+            <option value="">Choisir un compte…</option>
+            {candidates.filter((c) => !members.some((m) => m.actor_id === c.id)).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.email}</option>)}
+          </Select>
+          <Select value={candidateRole} onChange={(v) => setCandidateRole(v as RoleName)} disabled={busy}>
+            {ROLE_NAMES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}
+          </Select>
+          <Button disabled={busy || !candidateId} onClick={() => act(async () => {
+            const account = candidates.find((c) => c.id === candidateId)!;
+            await api.enterprise.updateMember(projectId, { actor_id: account.id, email: account.email, name: account.name, role: candidateRole });
+            setCandidateId("");
+          })}>Ajouter au projet</Button>
+        </> : <>
+          <Input value={memberName} onChange={setMemberName} placeholder="Nom" className="min-w-40" />
+          <Input value={memberEmail} onChange={setMemberEmail} placeholder="E-mail professionnel" className="flex-1 min-w-56" />
+          <Button disabled={busy || !memberEmail.trim() || !memberName.trim()} onClick={() => act(async () => {
+            const email = memberEmail.trim();
+            await api.enterprise.updateMember(projectId, { actor_id: email.toLowerCase(), email, name: memberName.trim(), role: "viewer" });
+            setMemberEmail(""); setMemberName("");
+          })}>Ajouter comme viewer</Button>
+        </>}
         <a href={api.enterprise.backupUrl(projectId)} className="px-3 py-1.5 text-sm rounded-md bg-surface-hover text-text-primary border border-border">Télécharger la sauvegarde</a>
       </Card>
       <div className="grid gap-2 md:grid-cols-2">{members.map((member) => <Card key={member.actor_id} className="flex items-center justify-between gap-3">
-        <div><p className="text-sm text-text-primary">{member.name}</p><p className="text-xs text-text-muted">{member.email}</p></div>
-        <Select value={member.role} disabled={busy} className="text-xs" onChange={(v) => act(() => api.enterprise.updateMember(projectId, { actor_id: member.actor_id, email: member.email, name: member.name, role: v as ProjectMember["role"] }))}>
-          {(["viewer", "operator", "reviewer", "admin"] as const).map((role) => <option key={role}>{role}</option>)}
-        </Select>
+        <div className="min-w-0"><p className="text-sm text-text-primary">{member.name}</p><p className="text-xs text-text-muted truncate">{member.email}</p></div>
+        <div className="flex items-center gap-1">
+          <Select value={member.role} disabled={busy} className="text-xs" onChange={(v) => act(() => api.enterprise.updateMember(projectId, { actor_id: member.actor_id, email: member.email, name: member.name, role: v as ProjectMember["role"] }))}>
+            {ROLE_NAMES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}
+          </Select>
+          {member.actor_id !== context?.actor.id && (
+            <Button variant="ghost" className="text-xs" disabled={busy} onClick={() => act(() => api.enterprise.removeMember(projectId, member.actor_id))}>Retirer</Button>
+          )}
+        </div>
       </Card>)}</div>
     </section>
 

@@ -596,6 +596,20 @@ class EnterpriseStore:
                        (user_id, email, name.strip() or email, role, self.hash_password(password), now()))
             return self._public_user(db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
 
+    def create_first_admin(self, email: str, name: str, password: str) -> dict[str, Any] | None:
+        """First-run setup: creates an admin only while the users table is empty, atomically
+        (check and insert under the same lock), so two concurrent setups can't both win.
+        Returns None once any account exists."""
+        with self._lock:
+            if self.user_count():
+                return None
+            return self.create_user(email, name, "admin", password)
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return self._public_user(row) if row else None
+
     def users(self) -> list[dict[str, Any]]:
         with self._connect() as db:
             return [self._public_user(row) for row in db.execute("SELECT * FROM users ORDER BY created_at").fetchall()]

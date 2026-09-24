@@ -1,4 +1,12 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+// Same host as the page by default (localhost stays localhost, 127.0.0.1 stays 127.0.0.1):
+// the session cookie is SameSite=Lax, so the console and the API must be same-site for the
+// browser to send it on fetch().
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8000` : "http://127.0.0.1:8000");
+
+// Fired on any 401 so AuthGate can show the login screen (expired or revoked session).
+export const AUTH_REQUIRED_EVENT = "biscuits:auth-required";
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly path: string, readonly detail: string) {
@@ -7,8 +15,17 @@ export class ApiError extends Error {
   }
 }
 
+// Every call carries the session cookie; /api/auth/* 401s are expected answers, not an expiry.
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_URL}${path}`, { ...init, credentials: "include" });
+  if (res.status === 401 && !path.startsWith("/api/auth/") && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+  }
+  return res;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await apiFetch(path, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
   });
@@ -290,9 +307,16 @@ export type SystemHealth = {
 // locked: forced on by BISCUITS_OFFLINE in the server's .env — cannot be turned off from the console.
 export type OfflineStatus = { enabled: boolean; locked: boolean };
 
+export type AuthMode = "local" | "login" | "proxy";
+export type Actor = { id: string; email: string; role: RoleName; name: string };
+// setup_required: login mode with no account yet — the console shows the first-run screen.
+export type AuthState = { auth_mode: AuthMode; actor: Actor | null; setup_required: boolean };
+export type User = { id: string; email: string; name: string; role: RoleName; enabled: boolean; created_at: string };
+export type UserUpdate = Partial<Pick<User, "role" | "enabled" | "name">> & { password?: string };
+
 export type EnterpriseContext = {
-  actor: { id: string; email: string; role: "viewer" | "operator" | "reviewer" | "admin"; name: string };
-  auth_mode: "local" | "proxy";
+  actor: Actor;
+  auth_mode: AuthMode;
   audit_chain_valid: boolean;
 };
 export type EnterpriseMetrics = {
@@ -381,6 +405,22 @@ export type OpportunityAnalysis = {
 
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
+
+  auth: {
+    me: () => request<AuthState>("/api/auth/me"),
+    login: (email: string, password: string) =>
+      request<{ actor: Actor }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+    setup: (email: string, name: string, password: string) =>
+      request<{ actor: Actor }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ email, name, password }) }),
+    logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+    changePassword: (current_password: string, new_password: string) =>
+      request<void>("/api/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) }),
+    users: () => request<User[]>("/api/auth/users"),
+    createUser: (user: Pick<User, "email" | "name" | "role"> & { password: string }) =>
+      request<User>("/api/auth/users", { method: "POST", body: JSON.stringify(user) }),
+    updateUser: (id: string, changes: UserUpdate) =>
+      request<User>(`/api/auth/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(changes) }),
+  },
   systemHealth: () => request<SystemHealth>("/api/system/health"),
   offline: {
     get: () => request<OfflineStatus>("/api/system/offline"),
@@ -504,7 +544,7 @@ export const api = {
                    user_context: Record<string, string> = {},
                    onEvent: (event: string, payload: Record<string, unknown>) => void,
                    conversation_id: string | null = null, persist = false) => {
-      const res = await fetch(`${API_URL}${p(project)}/chat/stream`, {
+      const res = await apiFetch(`${p(project)}/chat/stream`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, adapter, rag, history, user_context, conversation_id, persist: persist || conversation_id !== null }),
       });
@@ -555,7 +595,7 @@ export const api = {
       const form = new FormData();
       form.append("file", file);
       form.append("category", category);
-      const res = await fetch(`${API_URL}${p(project)}/rag/documents/upload`, { method: "POST", body: form });
+      const res = await apiFetch(`${p(project)}/rag/documents/upload`, { method: "POST", body: form });
       if (!res.ok) throw new Error(`${res.status} upload: ${await res.text().catch(() => res.statusText)}`);
       return res.json();
     },
@@ -591,6 +631,9 @@ export const api = {
       request<AgentBudget>(`/api/enterprise/projects/${encodeURIComponent(project)}/budget`, { method: "PUT", body: JSON.stringify(budget) }),
     deployment: (project: string) => request<Record<string, unknown>>(`/api/enterprise/projects/${encodeURIComponent(project)}/deployment`),
     members: (project: string) => request<ProjectMember[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`),
+    // Accounts a project admin can add ("login" mode; empty otherwise).
+    memberCandidates: (project: string) =>
+      request<Pick<User, "id" | "email" | "name">[]>(`/api/enterprise/projects/${encodeURIComponent(project)}/member-candidates`),
     updateMember: (project: string, member: Pick<ProjectMember, "actor_id" | "email" | "name" | "role">) => request<ProjectMember>(`/api/enterprise/projects/${encodeURIComponent(project)}/members`, { method: "PUT", body: JSON.stringify(member) }),
     removeMember: (project: string, actorId: string) => request<{ deleted: boolean }>(`/api/enterprise/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(actorId)}`, { method: "DELETE" }),
     backupUrl: (project: string) => `${API_URL}/api/enterprise/projects/${encodeURIComponent(project)}/backup`,

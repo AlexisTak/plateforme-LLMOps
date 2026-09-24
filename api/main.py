@@ -65,14 +65,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="OpenAgent — Management API", version="0.1.0", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,  # the session cookie (F01) must ride along on cross-origin console calls
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.middleware("http")
 async def observability_and_audit(request, call_next):
@@ -147,6 +139,17 @@ class ApiV1AliasMiddleware:
 
 
 app.add_middleware(ApiV1AliasMiddleware)
+
+# Registered last = outermost layer. It must wrap the auth middleware above: preflight
+# OPTIONS requests never carry the session cookie (they'd get a 401), and a 401 without
+# CORS headers reaches the console as a network error instead of "session expired".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,  # the session cookie (F01) must ride along on cross-origin console calls
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(auth.router)
 app.include_router(dataset.router)

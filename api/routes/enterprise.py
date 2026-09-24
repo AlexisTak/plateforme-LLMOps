@@ -286,11 +286,30 @@ def list_members(request: Request, project: Path = Depends(project_dir)):
     return store.members(project.name)
 
 
+@router.get("/projects/{project_id}/member-candidates")
+def member_candidates(request: Request, project: Path = Depends(project_dir)):
+    """Accounts a project admin can add as members ("login" mode only): /api/auth/users is
+    reserved to global admins, and a project admin only needs id, name and e-mail."""
+    current = actor(request)
+    store.require_project_role(project.name, current, "admin")
+    if auth_mode() != "login":
+        return []
+    return [{"id": u["id"], "email": u["email"], "name": u["name"]} for u in store.users() if u["enabled"]]
+
+
 @router.put("/projects/{project_id}/members")
 def update_member(body: MemberUpdate, request: Request, project: Path = Depends(project_dir)):
     current = actor(request)
     store.require_project_role(project.name, current, "admin")
-    result = store.set_member(project.name, body.actor_id, body.email, body.name, body.role)
+    email, name = body.email, body.name
+    if auth_mode() == "login":
+        # Membership is keyed on the session actor id, i.e. the account id: an e-mail or a
+        # typo would create a member nobody can ever log in as. Identity comes from the account.
+        user = store.get_user(body.actor_id)
+        if user is None or not user["enabled"]:
+            raise HTTPException(400, "Compte inconnu ou désactivé — choisis un compte existant")
+        email, name = user["email"], user["name"]
+    result = store.set_member(project.name, body.actor_id, email, name, body.role)
     store.audit(current.id, "member.updated", "project_member", body.actor_id, project.name, {"role": body.role})
     return result
 

@@ -213,3 +213,26 @@ def test_tool_execution_revalidates_stored_url(proxy_client, tmp_path, monkeypat
     )
     assert response.status_code == 400, response.text
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# CORS must wrap the auth middleware (the web console is cross-origin: :3000 -> :8000)
+
+CONSOLE = "http://localhost:3000"
+
+
+def test_cors_preflight_is_not_blocked_by_auth(login_client):
+    # Browsers never send cookies on preflight: a 401 here broke every console call in login mode.
+    response = login_client.options("/api/projects", headers={
+        "Origin": CONSOLE, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "content-type",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == CONSOLE
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_unauthenticated_401_carries_cors_headers(login_client):
+    # Without them the console sees a network error and can't show the login screen.
+    response = login_client.get("/api/projects", headers={"Origin": CONSOLE})
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == CONSOLE

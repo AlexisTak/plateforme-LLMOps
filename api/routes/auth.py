@@ -16,6 +16,7 @@ meaningless there and say so.
 
 from __future__ import annotations
 
+import ipaddress
 import threading
 import time
 from collections import defaultdict, deque
@@ -69,6 +70,31 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=10, max_length=1024)
 
 
+class FirstAdmin(BaseModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+$")
+    name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=10, max_length=1024)
+
+
+# Headers a reverse proxy adds: behind one, request.client is the proxy (often 127.0.0.1),
+# so "the caller is local" can't be trusted and first-run setup is refused.
+_FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
+
+
+def _is_direct_local_client(request: Request) -> bool:
+    if any(request.headers.get(header) for header in _FORWARDING_HEADERS):
+        return False
+    host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _setup_required() -> bool:
+    return auth_mode() == "login" and store.user_count() == 0
+
+
 def _client_key(request: Request, email: str) -> tuple[str, str]:
     host = request.client.host if request.client else "unknown"
     return host, email.strip().lower()
@@ -110,20 +136,43 @@ def me(request: Request):
     """Who am I, and which auth mode is the API in — the console reads this once
     at startup to decide whether to show the login screen."""
     mode = auth_mode()
+    setup_required = _setup_required()
     try:
         actor = actor_from_request(request)
     except HTTPException as exc:
         if exc.status_code == 401:
-            return {"auth_mode": mode, "actor": None}
+            return {"auth_mode": mode, "actor": None, "setup_required": setup_required}
         raise
-    return {"auth_mode": mode, "actor": actor.__dict__}
+    return {"auth_mode": mode, "actor": actor.__dict__, "setup_required": setup_required}
+
+
+@router.post("/setup", status_code=201)
+def first_run_setup(body: FirstAdmin, request: Request, response: Response):
+    """First-run screen: creates the initial admin while no account exists and opens its
+    session. Accepted only from a direct loopback client (the machine running the API),
+    so a fresh install reachable on the network can't be claimed by someone else."""
+    _require_login_mode()
+    if not _is_direct_local_client(request):
+        raise HTTPException(403, "Le premier compte ne peut être créé que depuis la machine qui héberge l’API "
+                                 "(ou avec scripts/create_user.py)")
+    user = store.create_first_admin(body.email, body.name, body.password)
+    if user is None:
+        raise HTTPException(409, "Un compte existe déjà — connecte-toi")
+    client = request.client.host if request.client else None
+    token = store.create_session(user["id"], client=client)
+    _set_session_cookie(response, request, token)
+    store.audit(user["id"], "auth.user.created", "user", user["id"], None,
+                {"email": user["email"], "role": "admin", "first_run": True})
+    store.audit(user["id"], "auth.login", "user", user["id"], None, {"client": client})
+    return {"actor": Actor(user["id"], user["email"], user["role"], user["name"]).__dict__, "token": token}
 
 
 @router.post("/login")
 def login(body: LoginRequest, request: Request, response: Response):
     _require_login_mode()
     if store.user_count() == 0:
-        raise HTTPException(503, "Aucun compte — crée l'administrateur initial avec scripts/create_user.py")
+        raise HTTPException(503, "Aucun compte — crée l'administrateur depuis l'écran de premier lancement "
+                                 "ou avec scripts/create_user.py")
     key = _client_key(request, body.email)
     if _throttled(key):
         raise HTTPException(429, "Trop de tentatives — réessaie dans quelques minutes")
