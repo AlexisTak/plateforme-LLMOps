@@ -110,9 +110,19 @@ if (-not (Test-Path $envFile)) {
 
 & $venvPython -c "import torch; print('torch', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
 
+# --- Models for offline mode (BISCUITS_OFFLINE=1 by default) ----------------------------
+
+Write-Host "Pre-downloading RAG models (offline mode forbids downloads later)..." -ForegroundColor Cyan
+& $venvPython (Join-Path $root "scripts\prefetch_models.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Some models could not be downloaded - rerun: .venv\Scripts\python scripts\prefetch_models.py" -ForegroundColor Yellow
+}
+
 Write-Host "`n== Setup complete ==" -ForegroundColor Cyan
 Write-Host "Not in git, to restore on this machine if needed:"
 Write-Host "  - model weights/adapters under projects\<id>\models\ (copy them or retrain)"
 Write-Host "  - RAG index: .venv\Scripts\python -m rag.index"
 Write-Host "  - login mode accounts: .venv\Scripts\python scripts\create_user.py"
+Write-Host "Offline mode is ON by default (.env: BISCUITS_OFFLINE=1). To cache a project's base model:"
+Write-Host "  .venv\Scripts\python scripts\prefetch_models.py <hf-repo-id>"
 Write-Host "Then run: .\start.ps1"
