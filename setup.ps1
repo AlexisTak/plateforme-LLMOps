@@ -2,12 +2,12 @@
 # pinned Python deps, web console deps and a local .env.
 #
 # Usage:
-#   .\setup-windows.ps1          # auto-detects an NVIDIA GPU (nvidia-smi)
-#   .\setup-windows.ps1 -Cpu     # force the CPU-only PyTorch wheel
-#   .\setup-windows.ps1 -Force   # recreate .venv from scratch
+#   .\setup.ps1          # auto-detects an NVIDIA GPU (nvidia-smi)
+#   .\setup.ps1 -Cpu     # force the CPU-only PyTorch wheel
+#   .\setup.ps1 -Force   # recreate .venv from scratch
 #
 # If script execution is blocked:
-#   powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
+#   powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 param(
     [switch]$Cpu,

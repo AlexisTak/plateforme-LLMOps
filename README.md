@@ -47,13 +47,13 @@ Prérequis : Python 3.11 (avec le lanceur `py`), Node.js 20+ et, pour l'inféren
 locale, [Ollama](https://ollama.com). Puis :
 
 ```powershell
-.\setup-windows.ps1        # détecte le GPU NVIDIA (sinon PyTorch CPU)
-# .\setup-windows.ps1 -Cpu   # forcer la variante sans GPU
-# .\setup-windows.ps1 -Force # recréer .venv
+.\setup.ps1        # détecte le GPU NVIDIA (sinon PyTorch CPU)
+# .\setup.ps1 -Cpu   # forcer la variante sans GPU
+# .\setup.ps1 -Force # recréer .venv
 .\start.ps1
 ```
 
-Si l'exécution de scripts est bloquée : `powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1`.
+Si l'exécution de scripts est bloquée : `powershell -ExecutionPolicy Bypass -File .\setup.ps1`.
 
 ### Configuration (.env)
 
